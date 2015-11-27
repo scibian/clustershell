@@ -1,0 +1,12 @@
+#!/usr/bin/make -f
+
+%:
+	dh $@ --with python2
+
+get-orig-tarball:
+	uscan --verbose --force-download
+
+clean:
+	dh $@
+	rm -rf scripts/nodeset scripts/clush scripts/clubak lib/ClusterShell.egg-info
+

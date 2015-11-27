@@ -1,0 +1,83 @@
+clustershell (1.7-1-1) unstable; urgency=low
+
+  * New upstream release 1.7
+  * Debian policy 3.9.6, no changes required
+  * Add python-yaml as recommended
+
+ -- Stéphan Gorget <phantez@gmail.com>  Fri, 27 Nov 2015 11:14:20 +0100
+
+clustershell (1.6-4) unstable; urgency=low
+
+  * Remove lib/ClusterShell.egg-info after build. Closes: #671188
+
+ -- Stéphan Gorget <phantez@gmail.com>  Wed, 20 Feb 2014 07:00:00 +0100
+
+clustershell (1.6-3) UNRELEASED; urgency=low
+
+  * Move recommends to suggests
+  * Debian policy 3.9.5
+
+ -- Stéphan Gorget <phantez@gmail.com>  Wed, 19 Feb 2014 18:07:11 +0100
+
+clustershell (1.6-2) UNRELEASED; urgency=low
+
+  * Remove Vcs-* fields pointing to upstream repository.
+  * Add Vcs-* fields pointing to Debian packaging.
+
+ -- Jakub Wilk <jwilk@debian.org>  Sun, 05 May 2013 15:37:00 +0200
+
+clustershell (1.6-1) unstable; urgency=low
+
+  * New upstream release 1.6
+  * Changed groups.conf to works with mawk. Closes: #638752
+  * Added new folder groups.conf.d and 2 example files and a README
+  * Mainstream project has moved from sourceforge to github
+    - Changed all the related urls
+  * Validated Standards-Version 3.9.3
+
+ -- Stéphan Gorget <phantez@gmail.com>  Sat, 14 Apr 2012 00:36:24 +0200
+
+clustershell (1.5.1-1) unstable; urgency=low
+
+  * New upstream release
+
+ -- Stéphan Gorget <phantez@gmail.com>  Tue, 12 Jul 2011 18:45:38 +0200
+
+clustershell (1.4.3-1) unstable; urgency=low
+
+  * New upstream release 1.4.3
+  * Changed to use dh_python2
+  * Debian policy 3.9.2
+
+ -- Stéphan Gorget <phantez@gmail.com>  Sat, 16 Apr 2011 18:15:05 +0200
+
+clustershell (1.4-1) unstable; urgency=low
+
+  * New upstream release
+  * Add version number to the Build-Depends parameters :
+    - python-support (>= 0.6)
+    - python-all(>= 2.4)
+    - python-setuptools (>= 0.6)
+  * Remove debian/dir useless file
+
+ -- Stéphan Gorget <phantez@gmail.com>  Wed, 26 Jan 2011 10:48:28 +0100
+
+clustershell (1.3.3-1) unstable; urgency=low
+
+  * Modify rules to change from CDBS to dh
+  * Syntax highlighting for clustershell
+    - Modify control recommends vim-addon-manager
+    - Add README.Debian to explain how to integrate vim files with
+      vim-addon-manager.
+    - Add clustershell.yaml for vim-addon-manager
+    - Modify install and dirs to install yaml and .vim files
+  * New upstream release 1.3.3
+  * Add dependency to python-setuptools
+
+ -- Stéphan Gorget <phantez@gmail.com>  Sun, 28 Nov 2010 01:50:29 +0100
+
+clustershell (1.3-1) unstable; urgency=low
+
+  * Initial release. (Closes: #584769)
+
+ -- Stéphan Gorget <phantez@gmail.com>  Fri, 28 Jul 2010 18:38:40 +0200
