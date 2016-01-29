@@ -1,3 +1,9 @@
+clustershell (1.7-1-1+c9+1) calibre9; urgency=medium
+
+  * Backport to Calibre9.
+
+ -- Rémi Palancher <remi-externe.palancher@edf.fr>  Fri, 29 Jan 2016 10:13:13 +0100
+
 clustershell (1.7-1-1) unstable; urgency=low
 
   * New upstream release 1.7
