@@ -1,34 +1,22 @@
 #
-# Copyright CEA/DAM/DIF (2008-2015)
-#  Contributor: Stephane THIELL <sthiell@stanford.edu>
+# Copyright (C) 2008-2015 CEA/DAM
+# Copyright (C) 2015 Stephane Thiell <sthiell@stanford.edu>
 #
-# This file is part of the ClusterShell library.
+# This file is part of ClusterShell.
 #
-# This software is governed by the CeCILL-C license under French law and
-# abiding by the rules of distribution of free software.  You can  use,
-# modify and/ or redistribute the software under the terms of the CeCILL-C
-# license as circulated by CEA, CNRS and INRIA at the following URL
-# "http://www.cecill.info".
+# ClusterShell is free software; you can redistribute it and/or
+# modify it under the terms of the GNU Lesser General Public
+# License as published by the Free Software Foundation; either
+# version 2.1 of the License, or (at your option) any later version.
 #
-# As a counterpart to the access to the source code and  rights to copy,
-# modify and redistribute granted by the license, users are provided only
-# with a limited warranty  and the software's author,  the holder of the
-# economic rights,  and the successive licensors  have only  limited
-# liability.
+# ClusterShell is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+# Lesser General Public License for more details.
 #
-# In this respect, the user's attention is drawn to the risks associated
-# with loading,  using,  modifying and/or developing or reproducing the
-# software by the user in light of its specific status of free software,
-# that may mean  that it is complicated to manipulate,  and  that  also
-# therefore means  that it is reserved for developers  and  experienced
-# professionals having in-depth computer knowledge. Users are therefore
-# encouraged to load and test the software's suitability as regards their
-# requirements in conditions enabling the security of their systems and/or
-# data to be ensured and,  more generally, to use and operate it in the
-# same conditions as regards security.
-#
-# The fact that you are presently reading this means that you have had
-# knowledge of the CeCILL-C license and that you accept its terms.
+# You should have received a copy of the GNU Lesser General Public
+# License along with ClusterShell; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 
 """
 WorkerPopen
@@ -47,6 +35,7 @@ Usage example:
 """
 
 from ClusterShell.Worker.Worker import WorkerSimple, StreamClient
+from ClusterShell.Worker.Worker import _eh_sigspec_invoke_compat
 
 
 class PopenClient(StreamClient):
@@ -88,20 +77,22 @@ class PopenClient(StreamClient):
         prc = self.popen.wait()
 
         self.streams.clear()
+        self.invalidate()
 
         if prc >= 0: # filter valid rc
             self.rc = prc
-            self.worker._on_rc(self.key, prc)
+            self.worker._on_close(self.key, prc)
         elif timeout:
             assert abort, "abort flag not set on timeout"
             self.worker._on_timeout(self.key)
         elif not abort:
             # if process was signaled, return 128 + signum (bash-like)
             self.rc = 128 + -prc
-            self.worker._on_rc(self.key, self.rc)
+            self.worker._on_close(self.key, self.rc)
 
-        if self.worker.eh:
-            self.worker.eh.ev_close(self.worker)
+        if self.worker.eh is not None:
+            _eh_sigspec_invoke_compat(self.worker.eh.ev_close, 2, self.worker,
+                                      timeout)
 
 
 class WorkerPopen(WorkerSimple):
@@ -117,6 +108,7 @@ class WorkerPopen(WorkerSimple):
         if not self.command:
             raise ValueError("missing command parameter in WorkerPopen "
                              "constructor")
+        self.key = key
 
     def retcode(self):
         """Return return code or None if command is still in progress."""

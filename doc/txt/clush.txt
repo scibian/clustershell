@@ -7,9 +7,9 @@ execute shell commands on a cluster
 -----------------------------------
 
 :Author: Stephane Thiell <sthiell@stanford.edu>
-:Date:   2015-11-01
-:Copyright: CeCILL-C V1
-:Version: 1.7
+:Date:   2018-10-30
+:Copyright: GNU Lesser General Public License version 2.1 or later (LGPLv2.1+)
+:Version: 1.8.1
 :Manual section: 1
 :Manual group: ClusterShell User Manual
 
@@ -54,18 +54,18 @@ Non-interactive mode
 
   The ``-w`` option allows you to specify remote hosts by using ClusterShell
   NodeSet syntax, including the node groups ``@group`` special syntax and the
-  ``Extended Patterns`` syntax to benefits from NodeSet basic arithmetics
+  ``Extended Patterns`` syntax to benefits from NodeSet basic arithmetic
   (like ``@Agroup\&@Bgroup``). See EXTENDED PATTERNS in ``nodeset``\(1) and
   also ``groups.conf``\(5) for more information.
 
-  Unless option ``--nostdin`` is specified, ``clush`` detects when its
-  standard input is connected to a terminal (as determined by ``isatty``\(3)).
-  If actually connected to a terminal, ``clush`` listens to standard input
-  when commands are running, waiting for an `Enter` key press. Doing so will
-  display the status of current nodes.  If standard input is not connected
-  to a terminal, and unless option ``--nostdin`` is specified, ``clush``
-  binds the standard input of the remote commands to its own standard input,
-  allowing scripting methods like:
+  Unless the option ``--nostdin`` (or ``-n``) is specified, ``clush`` detects
+  when its standard input is connected to a terminal (as determined by
+  ``isatty``\(3)).  If actually connected to a terminal, ``clush`` listens to
+  standard input when commands are running, waiting for an `Enter` key press.
+  Doing so will display the status of current nodes.  If standard input is not
+  connected to a terminal, and unless the option ``--nostdin`` is specified,
+  ``clush`` binds the standard input of the remote commands to its own standard
+  input, allowing scripting methods like:
 
     | # echo foo | clush -w node[40-42] -b cat
     | ---------------
@@ -88,7 +88,7 @@ Interactive session
   Single-character interactive commands are:
     clush> ?
       show current nodeset
-    clush> =<NODESET>
+    clush> @<NODESET>
       set current nodeset
     clush> +<NODESET>
       add nodes to current nodeset
@@ -130,7 +130,9 @@ OPTIONS
 --version             show ``clush`` version number and exit
 -s GROUPSOURCE, --groupsource=GROUPSOURCE
                       optional ``groups.conf``\(5) group source to use
---nostdin             do not watch for possible input from stdin
+-n, --nostdin         do not watch for possible input from stdin; this should be used when ``clush`` is run in the background (or in scripts).
+--groupsconf=FILE     use alternate config file for groups.conf(5)
+--conf=FILE           use alternate config file for clush.conf(5)
 -O <KEY=VALUE>, --option=<KEY=VALUE>
                       override any key=value ``clush.conf``\(5) options (repeat as needed)
 
@@ -144,16 +146,17 @@ Selecting target nodes:
   --hostfile=FILE, --machinefile=FILE
                       path to a file containing a list of single hosts, node sets or node groups, separated by spaces and lines (may be specified multiple times, one per file)
   --topology=FILE     topology configuration file to use for tree mode
+  --pick=N            pick N node(s) at random in nodeset
 
 Output behaviour:
   -q, --quiet         be quiet, print essential output only
   -v, --verbose       be verbose, print informative messages
   -d, --debug         output more messages for debugging purpose
   -G, --groupbase     do not display group source prefix
-  -L                  disable header block and order output by nodes; additionally, when used in conjunction with -b/-B, it will enable "life gathering" of results by line mode, such as the next line is displayed as soon as possible (eg. when all nodes have sent the line)
+  -L                  disable header block and order output by nodes; if -b/-B is not specified, ``clush`` will wait for all commands to finish and then display aggregated output of commands with same return codes, ordered by node name; alternatively, when used in conjunction with -b/-B (eg. -bL), ``clush`` will enable a "life gathering" of results by line, such as the next line is displayed as soon as possible (eg. when all nodes have sent the line)
   -N                  disable labeling of command line
   -P, --progress      show progress during command execution; if writing is performed to standard input, the live progress indicator will display the global bandwidth of data written to the target nodes
-  -b, --dshbak        display gathered results in a dshbak-like way
+  -b, --dshbak        display gathered results in a dshbak-like way (note: it will only try to aggregate the output of commands with same return codes)
   -B                  like -b but including standard error
   -r, --regroup       fold nodeset using node groups
   -S                  return the largest of command return codes
@@ -170,7 +173,7 @@ File copying:
 
 Connection options:
   -f FANOUT, --fanout=FANOUT
-                      use a specified maximum fanout size (ie. do not execute more than FANOUT commands at the same time, useful to limit resource usage)
+                      do not execute more than FANOUT commands at the same time, useful to limit resource usage. In tree mode, the same *fanout* value is used on the head node and on each gateway (the *fanout* value is propagated). That is, if the *fanout* is **16**, each gateway will initate up to **16** connections to their target nodes at the same time. Default *fanout* value is defined in ``clush.conf``\(5).
   -l USER, --user=USER
                       execute remote command as user
   -o OPTIONS, --options=OPTIONS
@@ -181,6 +184,7 @@ Connection options:
                       limit time for command to run on the node
   -R WORKER, --worker=WORKER
                       worker name to use for connection (``exec``, ``ssh``, ``rsh``, ``pdsh``), default is ``ssh``
+  --remote=REMOTE     whether to enable remote execution: in tree mode, 'yes' forces connections to the leaf nodes for execution, 'no' establishes connections up to the leaf parent nodes for execution (default is 'yes') 
 
 For a short explanation of these options, see ``-h, --help``.
 
@@ -275,10 +279,17 @@ FILES
 =====
 
 */etc/clustershell/clush.conf*
-  System-wide ``clush`` configuration file.
+  System-wide clush configuration file.
+
+*$XDG_CONFIG_HOME/clustershell/clush.conf*
+  User configuration file for clush. If $XDG_CONFIG_HOME is not defined,
+  *$HOME/.config/clustershell/clush.conf* is used instead.
+
+*$HOME/.local/etc/clustershell/clush.conf*
+  Local user configuration file for clush (default installation for pip --user)
 
 *~/.clush.conf*
-  This is the per-user ``clush`` configuration file.
+  Deprecated per-user clush configuration file.
 
 *~/.clush_history*
   File in which interactive ``clush`` command history is saved.
@@ -286,7 +297,9 @@ FILES
 SEE ALSO
 ========
 
-``clubak``\(1), ``nodeset``\(1), ``readline``\(3), ``clush.conf``\(5), ``groups.conf``\(5).
+``clubak``\(1), ``cluset``\(1), ``nodeset``\(1), ``readline``\(3), ``clush.conf``\(5), ``groups.conf``\(5).
+
+http://clustershell.readthedocs.org/
 
 BUG REPORTS
 ===========

@@ -1,39 +1,27 @@
-#!/usr/bin/env python
 #
-# Copyright CEA/DAM/DIF (2010-2015)
-#  Contributor: Stephane THIELL <sthiell@stanford.edu>
+# Copyright (C) 2010-2015 CEA/DAM
 #
-# This file is part of the ClusterShell library.
+# This file is part of ClusterShell.
 #
-# This software is governed by the CeCILL-C license under French law and
-# abiding by the rules of distribution of free software.  You can  use,
-# modify and/ or redistribute the software under the terms of the CeCILL-C
-# license as circulated by CEA, CNRS and INRIA at the following URL
-# "http://www.cecill.info".
+# ClusterShell is free software; you can redistribute it and/or
+# modify it under the terms of the GNU Lesser General Public
+# License as published by the Free Software Foundation; either
+# version 2.1 of the License, or (at your option) any later version.
 #
-# As a counterpart to the access to the source code and  rights to copy,
-# modify and redistribute granted by the license, users are provided only
-# with a limited warranty  and the software's author,  the holder of the
-# economic rights,  and the successive licensors  have only  limited
-# liability.
+# ClusterShell is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+# Lesser General Public License for more details.
 #
-# In this respect, the user's attention is drawn to the risks associated
-# with loading,  using,  modifying and/or developing or reproducing the
-# software by the user in light of its specific status of free software,
-# that may mean  that it is complicated to manipulate,  and  that  also
-# therefore means  that it is reserved for developers  and  experienced
-# professionals having in-depth computer knowledge. Users are therefore
-# encouraged to load and test the software's suitability as regards their
-# requirements in conditions enabling the security of their systems and/or
-# data to be ensured and,  more generally, to use and operate it in the
-# same conditions as regards security.
-#
-# The fact that you are presently reading this means that you have had
-# knowledge of the CeCILL-C license and that you accept its terms.
+# You should have received a copy of the GNU Lesser General Public
+# License along with ClusterShell; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 
 """
 CLI results display class
 """
+
+from __future__ import print_function
 
 import difflib
 import sys
@@ -48,18 +36,28 @@ VERB_DEBUG = 3
 THREE_CHOICES = ["never", "always", "auto"]
 WHENCOLOR_CHOICES = THREE_CHOICES   # deprecated; use THREE_CHOICES
 
+# Python 3 compat: wrappers for standard streams
+def sys_stdin():
+    return getattr(sys.stdin, 'buffer', sys.stdin)
+
+def sys_stdout():
+    return getattr(sys.stdout, 'buffer', sys.stdout)
+
+def sys_stderr():
+    return getattr(sys.stderr, 'buffer', sys.stderr)
+
 
 class Display(object):
     """
     Output display class for command line scripts.
     """
-    COLOR_RESULT_FMT = "\033[32m%s\033[0m"
-    COLOR_STDOUT_FMT = "\033[34m%s\033[0m"
-    COLOR_STDERR_FMT = "\033[31m%s\033[0m"
+    COLOR_RESULT_FMT = "\033[92m%s\033[0m"
+    COLOR_STDOUT_FMT = "\033[94m%s\033[0m"
+    COLOR_STDERR_FMT = "\033[91m%s\033[0m"
     COLOR_DIFFHDR_FMT = "\033[1m%s\033[0m"
-    COLOR_DIFFHNK_FMT = "\033[36m%s\033[0m"
-    COLOR_DIFFADD_FMT = "\033[32m%s\033[0m"
-    COLOR_DIFFDEL_FMT = "\033[31m%s\033[0m"
+    COLOR_DIFFHNK_FMT = "\033[96m%s\033[0m"
+    COLOR_DIFFADD_FMT = "\033[92m%s\033[0m"
+    COLOR_DIFFDEL_FMT = "\033[91m%s\033[0m"
     SEP = "-" * 15
 
     class _KeySet(set):
@@ -83,7 +81,7 @@ class Display(object):
         # diff implies at least -b
         self.gather = options.gatherall or options.gather or options.diff
         self.progress = getattr(options, 'progress', False) # only in clush
-        # check parameter combinaison
+        # check parameter compatibility
         if options.diff and options.line_mode:
             raise ValueError("diff not supported in line_mode")
         self.line_mode = options.line_mode
@@ -103,9 +101,9 @@ class Display(object):
                 color = True
 
         self._color = color
+        self.out = sys_stdout()
+        self.err = sys_stderr()
 
-        self.out = sys.stdout
-        self.err = sys.stderr
         if self._color:
             self.color_stdout_fmt = self.COLOR_STDOUT_FMT
             self.color_stderr_fmt = self.COLOR_STDERR_FMT
@@ -158,32 +156,33 @@ class Display(object):
 
     def format_header(self, nodeset, indent=0):
         """Format nodeset-based header."""
+        if not self.label:
+            return b""
         indstr = " " * indent
         nodecntstr = ""
         if self.verbosity >= VERB_STD and self.node_count and len(nodeset) > 1:
             nodecntstr = " (%d)" % len(nodeset)
-        if not self.label:
-            return ""
-        return self.color_stdout_fmt % ("%s%s\n%s%s%s\n%s%s" % \
+        hdr = self.color_stdout_fmt % ("%s%s\n%s%s%s\n%s%s" % \
             (indstr, self.SEP,
              indstr, self._format_nodeset(nodeset), nodecntstr,
              indstr, self.SEP))
+        return hdr.encode('ascii') + b'\n'
 
     def print_line(self, nodeset, line):
         """Display a line with optional label."""
         if self.label:
             prefix = self.color_stdout_fmt % ("%s: " % nodeset)
-            self.out.write("%s%s\n" % (prefix, line))
+            self.out.write(prefix.encode('ascii') + line + b'\n')
         else:
-            self.out.write("%s\n" % line)
+            self.out.write(line + b'\n')
 
     def print_line_error(self, nodeset, line):
         """Display an error line with optional label."""
         if self.label:
             prefix = self.color_stderr_fmt % ("%s: " % nodeset)
-            self.err.write("%s%s\n" % (prefix, line))
+            self.err.write(prefix.encode('ascii') + line + b'\n')
         else:
-            self.err.write("%s\n" % line)
+            self.err.write(line + b'\n')
 
     def print_gather(self, nodeset, obj):
         """Generic method for displaying nodeset/content according to current
@@ -202,7 +201,7 @@ class Display(object):
 
     def _print_content(self, nodeset, content):
         """Display a dshbak-like header block and content."""
-        self.out.write("%s\n%s\n" % (self.format_header(nodeset), content))
+        self.out.write(self.format_header(nodeset) + bytes(content) + b'\n')
 
     def _print_diff(self, nodeset, content):
         """Display unified diff between remote gathered outputs."""
@@ -218,10 +217,11 @@ class Display(object):
                 if len(nodeset) > 1:
                     nsstr += " (%d)" % len(nodeset)
 
-            udiff = difflib.unified_diff(list(content_ref), list(content), \
-                                         fromfile=nsstr_ref, tofile=nsstr, \
-                                         lineterm='')
-            output = ""
+            alist = [aline.decode('utf-8', 'ignore') for aline in content_ref]
+            blist = [bline.decode('utf-8', 'ignore') for bline in content]
+            udiff = difflib.unified_diff(alist, blist, fromfile=nsstr_ref,
+                                         tofile=nsstr, lineterm='')
+            output = ''
             for line in udiff:
                 if line.startswith('---') or line.startswith('+++'):
                     output += self.color_diffhdr_fmt % line.rstrip()
@@ -234,41 +234,29 @@ class Display(object):
                 else:
                     output += line
                 output += '\n'
-            self.out.write(output)
+            self.out.write(output.encode('ascii'))
 
     def _print_lines(self, nodeset, msg):
         """Display a MsgTree buffer by line with prefixed header."""
         out = self.out
         if self.label:
-            if self.gather:
-                header = self.color_stdout_fmt % \
-                            ("%s: " % self._format_nodeset(nodeset))
-                for line in msg:
-                    out.write("%s%s\n" % (header, line))
-            else:
-                for node in nodeset:
-                    header = self.color_stdout_fmt % \
-                                ("%s: " % self._format_nodeset(node))
-                    for line in msg:
-                        out.write("%s%s\n" % (header, line))
+            header = self.color_stdout_fmt % \
+                        ("%s: " % self._format_nodeset(nodeset))
+            for line in msg:
+                out.write(header.encode('ascii') + line + b'\n')
         else:
-            if self.gather:
-                for line in msg:
-                    out.write(line + '\n')
-            else:
-                for node in nodeset:
-                    for line in msg:
-                        out.write(line + '\n')
+            for line in msg:
+                out.write(line + b'\n')
 
     def vprint(self, level, message):
         """Utility method to print a message if verbose level is high
         enough."""
         if self.verbosity >= level:
-            print message
+            print(message)
 
     def vprint_err(self, level, message):
         """Utility method to print a message on stderr if verbose level
         is high enough."""
         if self.verbosity >= level:
-            print >> sys.stderr, message
+            print(message, file=sys.stderr)
 

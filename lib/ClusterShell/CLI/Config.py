@@ -1,41 +1,33 @@
-#!/usr/bin/env python
 #
-# Copyright CEA/DAM/DIF (2010-2015)
-#  Contributor: Stephane THIELL <sthiell@stanford.edu>
+# Copyright (C) 2010-2016 CEA/DAM
+# Copyright (C) 2017 Stephane Thiell <sthiell@stanford.edu>
 #
-# This file is part of the ClusterShell library.
+# This file is part of ClusterShell.
 #
-# This software is governed by the CeCILL-C license under French law and
-# abiding by the rules of distribution of free software.  You can  use,
-# modify and/ or redistribute the software under the terms of the CeCILL-C
-# license as circulated by CEA, CNRS and INRIA at the following URL
-# "http://www.cecill.info".
+# ClusterShell is free software; you can redistribute it and/or
+# modify it under the terms of the GNU Lesser General Public
+# License as published by the Free Software Foundation; either
+# version 2.1 of the License, or (at your option) any later version.
 #
-# As a counterpart to the access to the source code and  rights to copy,
-# modify and redistribute granted by the license, users are provided only
-# with a limited warranty  and the software's author,  the holder of the
-# economic rights,  and the successive licensors  have only  limited
-# liability.
+# ClusterShell is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+# Lesser General Public License for more details.
 #
-# In this respect, the user's attention is drawn to the risks associated
-# with loading,  using,  modifying and/or developing or reproducing the
-# software by the user in light of its specific status of free software,
-# that may mean  that it is complicated to manipulate,  and  that  also
-# therefore means  that it is reserved for developers  and  experienced
-# professionals having in-depth computer knowledge. Users are therefore
-# encouraged to load and test the software's suitability as regards their
-# requirements in conditions enabling the security of their systems and/or
-# data to be ensured and,  more generally, to use and operate it in the
-# same conditions as regards security.
-#
-# The fact that you are presently reading this means that you have had
-# knowledge of the CeCILL-C license and that you accept its terms.
+# You should have received a copy of the GNU Lesser General Public
+# License along with ClusterShell; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 
 """
 CLI configuration classes
 """
 
-import ConfigParser
+try:
+    import configparser
+except ImportError:
+    # Python 2 compat
+    import ConfigParser as configparser
+
 from os.path import expanduser
 
 from ClusterShell.Defaults import config_paths, DEFAULTS
@@ -54,7 +46,7 @@ class ClushConfigError(Exception):
     def __str__(self):
         return "(Config %s.%s): %s" % (self.section, self.option, self.msg)
 
-class ClushConfig(ConfigParser.ConfigParser, object):
+class ClushConfig(configparser.ConfigParser, object):
     """Config class for clush (specialized ConfigParser)"""
 
     main_defaults = {"fanout": "%d" % DEFAULTS.fanout,
@@ -64,15 +56,15 @@ class ClushConfig(ConfigParser.ConfigParser, object):
                      "color": THREE_CHOICES[-1], # auto
                      "verbosity": "%d" % VERB_STD,
                      "node_count": "yes",
-                     "fd_max": "16384"}
+                     "fd_max": "8192"}
 
     def __init__(self, options, filename=None):
         """Initialize ClushConfig object from corresponding
         OptionParser options."""
-        ConfigParser.ConfigParser.__init__(self)
+        configparser.ConfigParser.__init__(self)
         # create Main section with default values
         self.add_section("Main")
-        for key, value in ClushConfig.main_defaults.iteritems():
+        for key, value in ClushConfig.main_defaults.items():
             self.set("Main", key, value)
         # config files override defaults values
         if filename:
@@ -108,7 +100,7 @@ class ClushConfig(ConfigParser.ConfigParser, object):
             for cfgopt in options.option:
                 optkey, optvalue = cfgopt.split('=', 1)
                 self._set_main(optkey, optvalue)
-        except ValueError, exc:
+        except ValueError as exc:
             raise ClushConfigError("Main", cfgopt, "invalid -O/--option value")
 
     def _set_main(self, option, value):
@@ -118,9 +110,9 @@ class ClushConfig(ConfigParser.ConfigParser, object):
     def _getx(self, xtype, section, option):
         """Return a value of specified type for the named option."""
         try:
-            return getattr(ConfigParser.ConfigParser, 'get%s' % xtype)(self, \
+            return getattr(configparser.ConfigParser, 'get%s' % xtype)(self, \
                 section, option)
-        except (ConfigParser.Error, TypeError, ValueError), exc:
+        except (configparser.Error, TypeError, ValueError) as exc:
             raise ClushConfigError(section, option, exc)
 
     def getboolean(self, section, option):
@@ -140,7 +132,7 @@ class ClushConfig(ConfigParser.ConfigParser, object):
         not raise an exception if the option doesn't exist."""
         try:
             return self.get(section, option)
-        except ConfigParser.Error:
+        except configparser.Error:
             pass
 
     @property
