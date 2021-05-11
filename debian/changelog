@@ -1,3 +1,9 @@
+clustershell (1.8.1-1sci9u1) scibian9; urgency=medium
+
+  * Backport to scibian9
+
+ -- Rémi Palancher <remi-externe.palancher@edf.fr>  Tue, 11 May 2021 22:05:02 +0200
+
 clustershell (1.8.1-1) unstable; urgency=medium
 
   [ Ondřej Nový ]
