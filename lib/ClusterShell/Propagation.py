@@ -1,36 +1,23 @@
-#!/usr/bin/env python
 #
-# Copyright CEA/DAM/DIF (2010-2015)
-#  Contributor: Henri DOREAU <henri.doreau@cea.fr>
-#  Contributor: Stephane THIELL <sthiell@stanford.edu>
+# Copyright (C) 2010-2016 CEA/DAM
+# Copyright (C) 2010-2011 Henri Doreau <henri.doreau@cea.fr>
+# Copyright (C) 2015-2018 Stephane Thiell <sthiell@stanford.edu>
 #
-# This file is part of the ClusterShell library.
+# This file is part of ClusterShell.
 #
-# This software is governed by the CeCILL-C license under French law and
-# abiding by the rules of distribution of free software.  You can  use,
-# modify and/ or redistribute the software under the terms of the CeCILL-C
-# license as circulated by CEA, CNRS and INRIA at the following URL
-# "http://www.cecill.info".
+# ClusterShell is free software; you can redistribute it and/or
+# modify it under the terms of the GNU Lesser General Public
+# License as published by the Free Software Foundation; either
+# version 2.1 of the License, or (at your option) any later version.
 #
-# As a counterpart to the access to the source code and  rights to copy,
-# modify and redistribute granted by the license, users are provided only
-# with a limited warranty  and the software's author,  the holder of the
-# economic rights,  and the successive licensors  have only  limited
-# liability.
+# ClusterShell is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+# Lesser General Public License for more details.
 #
-# In this respect, the user's attention is drawn to the risks associated
-# with loading,  using,  modifying and/or developing or reproducing the
-# software by the user in light of its specific status of free software,
-# that may mean  that it is complicated to manipulate,  and  that  also
-# therefore means  that it is reserved for developers  and  experienced
-# professionals having in-depth computer knowledge. Users are therefore
-# encouraged to load and test the software's suitability as regards their
-# requirements in conditions enabling the security of their systems and/or
-# data to be ensured and,  more generally, to use and operate it in the
-# same conditions as regards security.
-#
-# The fact that you are presently reading this means that you have had
-# knowledge of the CeCILL-C license and that you accept its terms.
+# You should have received a copy of the GNU Lesser General Public
+# License along with ClusterShell; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 
 """
 ClusterShell Propagation module. Use the topology tree to send commands
@@ -53,6 +40,7 @@ from ClusterShell.Topology import TopologyError
 
 class RouteResolvingError(Exception):
     """error raised on invalid conditions during routing operations"""
+
 
 class PropagationTreeRouter(object):
     """performs routes resolving operations within a propagation tree.
@@ -78,23 +66,21 @@ class PropagationTreeRouter(object):
         destination nodes and the values are the next hop gateways to
         use to reach these nodes.
         """
-        self.table = {}
         try:
             root_group = topology.find_nodegroup(root)
         except TopologyError:
             msgfmt = "Invalid root or gateway node: %s"
             raise RouteResolvingError(msgfmt % root)
 
+        self.table = []
         for group in root_group.children():
-            self.table[group.nodeset] = NodeSet()
+            dest = NodeSet()
             stack = [group]
             while len(stack) > 0:
                 curr = stack.pop()
-                self.table[group.nodeset].add(curr.children_ns())
+                dest.update(curr.children_ns())
                 stack += curr.children()
-
-        # reverse table (it was crafted backward)
-        self.table = dict((v, k) for k, v in self.table.iteritems())
+            self.table.append((dest, group.nodeset))
 
     def dispatch(self, dst):
         """dispatch nodes from a target nodeset to the directly
@@ -113,7 +99,7 @@ class PropagationTreeRouter(object):
         #    yield nexthop, nexthop
 
         # Check for remote targets, that require a gateway to be reached
-        for network in self.table.iterkeys():
+        for network, _ in self.table:
             dst_inter = network & dst
             dst.difference_update(dst_inter)
             for host in dst_inter.nsiter():
@@ -146,7 +132,7 @@ class PropagationTreeRouter(object):
         # node[10-19] | gateway[1-2]
         #            ...
         # ---------
-        for network, nexthops in self.table.iteritems():
+        for network, nexthops in self.table:
             # destination contained in current network
             if dst in network:
                 res = self._best_next_hop(nexthops)
@@ -263,7 +249,7 @@ class PropagationChannel(Channel):
 
     def recv(self, msg):
         """process incoming messages"""
-        self.logger.debug("[DBG] rcvd from: %s", msg)
+        self.logger.debug("recv: %s", msg)
         if msg.type == EndMessage.ident:
             #??#self.ptree.notify_close()
             self.logger.debug("got EndMessage; closing")
@@ -292,13 +278,14 @@ class PropagationChannel(Channel):
         ctl.action = 'shell'
         ctl.target = nodes
 
-        # copy only subset of task info dict
-        info = dict((k, self.task._info[k]) for k in DEFAULTS._task_info_pkeys)
+        # keep only valid task info pairs
+        info = dict((k, v) for k, v in self.task._info.items()
+                    if k not in DEFAULTS._task_info_pkeys_bl)
 
         ctl_data = {
             'cmd': command,
             'invoke_gateway': gw_invoke_cmd, # XXX
-            'taskinfo': info, #self.task._info,
+            'taskinfo': info,
             'stderr': stderr,
             'timeout': timeout,
             'remote': remote,
@@ -344,7 +331,6 @@ class PropagationChannel(Channel):
 
     def recv_ctl(self, msg):
         """handle incoming messages for state 'control'"""
-        self.logger.debug("recv_ctl")
         if msg.type == 'ACK':
             self.logger.debug("got ack (%s)", msg.type)
             # check if ack matches write history msgid to generate ev_written
@@ -352,37 +338,31 @@ class PropagationChannel(Channel):
                 _, nodes, bytes_count, metaworker = self._cfg_write_hist.pop()
                 for node in nodes:
                     # we are losing track of the gateway here, we could override
-                    # on_written in WorkerTree if needed (eg. for stats)
+                    # on_written in TreeWorker if needed (eg. for stats)
                     metaworker._on_written(node, bytes_count, 'stdin')
             self.send_dequeue()
         elif isinstance(msg, RoutedMessageBase):
             metaworker = self.workers[msg.srcid]
             if msg.type == StdOutMessage.ident:
-                if metaworker.eh:
-                    nodeset = NodeSet(msg.nodes)
-                    decoded = msg.data_decode() + '\n'
-                    self.logger.debug("StdOutMessage: \"%s\"", decoded)
-                    for line in decoded.splitlines():
-                        for node in nodeset:
-                            metaworker._on_remote_node_msgline(node,
-                                                               line,
-                                                               'stdout',
-                                                               self.gateway)
+                nodeset = NodeSet(msg.nodes)
+                # msg.data_decode()'s name is a bit confusing, but returns
+                # pickle-decoded bytes (encoded string) and not string...
+                decoded = msg.data_decode() + b'\n'
+                for line in decoded.splitlines():
+                    for node in nodeset:
+                        metaworker._on_remote_node_msgline(node, line, 'stdout',
+                                                           self.gateway)
             elif msg.type == StdErrMessage.ident:
-                if metaworker.eh:
-                    nodeset = NodeSet(msg.nodes)
-                    decoded = msg.data_decode() + '\n'
-                    self.logger.debug("StdErrMessage: \"%s\"", decoded)
-                    for line in decoded.splitlines():
-                        for node in nodeset:
-                            metaworker._on_remote_node_msgline(node,
-                                                               line,
-                                                               'stderr',
-                                                               self.gateway)
+                nodeset = NodeSet(msg.nodes)
+                decoded = msg.data_decode() + b'\n'
+                for line in decoded.splitlines():
+                    for node in nodeset:
+                        metaworker._on_remote_node_msgline(node, line, 'stderr',
+                                                           self.gateway)
             elif msg.type == RetcodeMessage.ident:
                 rc = msg.retcode
                 for node in NodeSet(msg.nodes):
-                    metaworker._on_remote_node_rc(node, rc, self.gateway)
+                    metaworker._on_remote_node_close(node, rc, self.gateway)
             elif msg.type == TimeoutMessage.ident:
                 self.logger.debug("TimeoutMessage for %s", msg.nodes)
                 for node in NodeSet(msg.nodes):
@@ -401,11 +381,11 @@ class PropagationChannel(Channel):
             assert False
         """
 
-    def ev_hup(self, worker):
+    def ev_hup(self, worker, node, rc):
         """Channel command is closing"""
-        self._rc = worker.current_rc
+        self._rc = rc
 
-    def ev_close(self, worker):
+    def ev_close(self, worker, timedout):
         """Channel is closing"""
         # do not use worker buffer or rc accessors here as we doesn't use
         # common stream names
@@ -413,9 +393,13 @@ class PropagationChannel(Channel):
         self.logger.debug("ev_close gateway=%s %s", gateway, self)
         self.logger.debug("ev_close rc=%s", self._rc) # may be None
 
-        if self._rc: # got explicit error code
-            # ev_routing?
-            self.logger.debug("unreachable gateway %s", gateway)
-            worker.task.router.mark_unreachable(gateway)
-            self.logger.debug("worker.task.gateways=%s", worker.task.gateways)
-            # TODO: find best gateway, update WorkerTree counters, relaunch...
+        if self._rc:
+            self.logger.debug("error on gateway %s (setup=%s)", gateway,
+                              self.setup)
+            self.task.router.mark_unreachable(gateway)
+            self.logger.debug("gateway %s now set as unreachable", gateway)
+
+            if not self.setup:
+                # channel was not set up: we can safely repropagate commands
+                for mw in set(self.task.gateways[gateway][1]):
+                    mw._relaunch(gateway)

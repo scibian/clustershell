@@ -7,9 +7,9 @@ Configuration file for ClusterShell node groups
 -----------------------------------------------
 
 :Author: Stephane Thiell, <sthiell@stanford.edu>
-:Date:   2015-11-06
-:Copyright: CeCILL-C V1
-:Version: 1.7
+:Date:   2018-10-30
+:Copyright: GNU Lesser General Public License version 2.1 or later (LGPLv2.1+)
+:Version: 1.8.1
 :Manual section: 5
 :Manual group: ClusterShell User Manual
 
@@ -180,7 +180,6 @@ FILES
 SEE ALSO
 ========
 
-``clush``\(1), ``clubak``\(1), ``nodeset``\(1)
+``clubak``\(1), ``cluset``\(1), ``clush``\(1), ``nodeset``\(1)
 
-http://clustershell.sourceforge.net/
-
+http://clustershell.readthedocs.org/

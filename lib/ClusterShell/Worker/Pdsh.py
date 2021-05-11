@@ -1,34 +1,21 @@
 #
-# Copyright CEA/DAM/DIF (2007-2014)
-#  Contributor: Stephane THIELL <stephane.thiell@cea.fr>
+# Copyright (C) 2007-2016 CEA/DAM
 #
-# This file is part of the ClusterShell library.
+# This file is part of ClusterShell.
 #
-# This software is governed by the CeCILL-C license under French law and
-# abiding by the rules of distribution of free software.  You can  use,
-# modify and/ or redistribute the software under the terms of the CeCILL-C
-# license as circulated by CEA, CNRS and INRIA at the following URL
-# "http://www.cecill.info".
+# ClusterShell is free software; you can redistribute it and/or
+# modify it under the terms of the GNU Lesser General Public
+# License as published by the Free Software Foundation; either
+# version 2.1 of the License, or (at your option) any later version.
 #
-# As a counterpart to the access to the source code and  rights to copy,
-# modify and redistribute granted by the license, users are provided only
-# with a limited warranty  and the software's author,  the holder of the
-# economic rights,  and the successive licensors  have only  limited
-# liability.
+# ClusterShell is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+# Lesser General Public License for more details.
 #
-# In this respect, the user's attention is drawn to the risks associated
-# with loading,  using,  modifying and/or developing or reproducing the
-# software by the user in light of its specific status of free software,
-# that may mean  that it is complicated to manipulate,  and  that  also
-# therefore means  that it is reserved for developers  and  experienced
-# professionals having in-depth computer knowledge. Users are therefore
-# encouraged to load and test the software's suitability as regards their
-# requirements in conditions enabling the security of their systems and/or
-# data to be ensured and,  more generally, to use and operate it in the
-# same conditions as regards security.
-#
-# The fact that you are presently reading this means that you have had
-# knowledge of the CeCILL-C license and that you accept its terms.
+# You should have received a copy of the GNU Lesser General Public
+# License along with ClusterShell; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 
 """
 WorkerPdsh
@@ -39,7 +26,6 @@ ClusterShell worker for executing commands with LLNL pdsh.
 import errno
 import os
 import shlex
-import sys
 
 from ClusterShell.NodeSet import NodeSet
 from ClusterShell.Worker.EngineClient import EngineClientError
@@ -110,6 +96,7 @@ class PdshClient(ExecClient):
             raise WorkerError("Cannot run pdsh (error %d)" % prc)
 
         self.streams.clear()
+        self.invalidate()
 
         if timeout:
             assert abort, "abort flag not set on timeout"
@@ -117,7 +104,7 @@ class PdshClient(ExecClient):
                 self.worker._on_node_timeout(node)
         else:
             for node in (self.key - self._closed_nodes):
-                self.worker._on_node_rc(node, 0)
+                self.worker._on_node_close(node, 0)
 
         self.worker._check_fini()
 
@@ -125,9 +112,9 @@ class PdshClient(ExecClient):
         """
         Parse Pdsh line syntax.
         """
-        if line.startswith("pdsh@") or \
-           line.startswith("pdcp@") or \
-           line.startswith("sending "):
+        if line.startswith(b"pdsh@") or \
+           line.startswith(b"pdcp@") or \
+           line.startswith(b"sending "):
             try:
                 # pdsh@cors113: cors115: ssh exited with exit code 1
                 #       0          1      2     3     4    5    6  7
@@ -141,28 +128,28 @@ class PdshClient(ExecClient):
                 #     0             1      2    3     4    5    6    7
                 # pdcp@cors113: cors115: fatal: /var/cache/shine/...
                 #     0             1      2                   3...
-
-                words  = line.split()
+                words = line.split()
                 # Set return code for nodename of worker
                 if self.MODE == 'pdsh':
-                    if len(words) == 4 and words[2] == "command" and \
-                       words[3] == "timeout":
+                    if len(words) == 4 and words[2] == b"command" and \
+                       words[3] == b"timeout":
                         pass
-                    elif len(words) == 8 and words[3] == "exited" and \
+                    elif len(words) == 8 and words[3] == b"exited" and \
                          words[7].isdigit():
-                        self._closed_nodes.add(words[1][:-1])
-                        self.worker._on_node_rc(words[1][:-1], int(words[7]))
+                        nodename = words[1][:-1].decode()
+                        self._closed_nodes.add(nodename)
+                        self.worker._on_node_close(nodename, int(words[7]))
                 elif self.MODE == 'pdcp':
-                    self._closed_nodes.add(words[1][:-1])
-                    self.worker._on_node_rc(words[1][:-1], errno.ENOENT)
+                    nodename = words[1][:-1].decode()
+                    self._closed_nodes.add(nodename)
+                    self.worker._on_node_close(nodename, errno.ENOENT)
 
-            except Exception, exc:
-                print >> sys.stderr, exc
-                raise EngineClientError()
+            except Exception as exc:
+                raise EngineClientError("Pdsh parser error: %s" % exc)
         else:
             # split pdsh reply "nodename: msg"
-            nodename, msg = line.split(': ', 1)
-            self.worker._on_node_msgline(nodename, msg, sname)
+            nodename, msg = line.split(b': ', 1)
+            self.worker._on_node_msgline(nodename.decode(), msg, sname)
 
     def _flush_read(self, sname):
         """Called at close time to flush stream read buffer."""
@@ -188,6 +175,13 @@ class PdcpClient(CopyClient, PdshClient):
     """EngineClient when pdsh is run to copy file, using pdcp."""
 
     MODE = 'pdcp'
+
+    def __init__(self, node, source, dest, worker, stderr, timeout, autoclose,
+                 preserve, reverse, rank=None):
+        CopyClient.__init__(self, node, source, dest, worker, stderr, timeout,
+                            autoclose, preserve, reverse, rank)
+        PdshClient.__init__(self, node, None, worker, stderr, timeout,
+                            autoclose, rank)
 
     def _build_cmd(self):
 

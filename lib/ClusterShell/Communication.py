@@ -1,34 +1,23 @@
-#!/usr/bin/env python
 #
-# Copyright CEA/DAM/DIF (2010-2015)
-#  Contributor: Henri DOREAU <henri.doreau@cea.fr>
-#  Contributor: Stephane THIELL <sthiell@stanford.edu>
+# Copyright (C) 2010-2016 CEA/DAM
+# Copyright (C) 2010-2011 Henri Doreau <henri.doreau@cea.fr>
+# Copyright (C) 2015-2017 Stephane Thiell <sthiell@stanford.edu>
 #
-# This file is part of the ClusterShell library.
+# This file is part of ClusterShell.
 #
-# This software is governed by the CeCILL-C license under French law and abiding
-# by the rules of distribution of free software. You can use, modify and/ or
-# redistribute the software under the terms of the CeCILL-C license as
-# circulated by CEA, CNRS and INRIA at the following URL
-# "http://www.cecill.info".
+# ClusterShell is free software; you can redistribute it and/or
+# modify it under the terms of the GNU Lesser General Public
+# License as published by the Free Software Foundation; either
+# version 2.1 of the License, or (at your option) any later version.
 #
-# As a counterpart to the access to the source code and rights to copy, modify
-# and redistribute granted by the license, users are provided only with a
-# limited warranty and the software's author, the holder of the economic rights,
-# and the successive licensors have only limited liability.
+# ClusterShell is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+# Lesser General Public License for more details.
 #
-# In this respect, the user's attention is drawn to the risks associated with
-# loading, using, modifying and/or developing or reproducing the software by the
-# user in light of its specific status of free software, that may mean that it
-# is complicated to manipulate, and that also therefore means that it is
-# reserved for developers and experienced professionals having in-depth computer
-# knowledge. Users are therefore encouraged to load and test the software's
-# suitability as regards their requirements in conditions enabling the security
-# of their systems and/or data to be ensured and, more generally, to use and
-# operate it in the same conditions as regards security.
-#
-# The fact that you are presently reading this means that you have had knowledge
-# of the CeCILL-C license and that you accept its terms.
+# You should have received a copy of the GNU Lesser General Public
+# License along with ClusterShell; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 
 """
 ClusterShell inter-nodes communication module
@@ -53,9 +42,15 @@ Subclassing the Channel class allows implementing whatever logic you want on the
 top of a communication channel.
 """
 
-import cPickle
+try:
+    import _pickle as cPickle
+except ImportError:  # Python 2 compat
+    import cPickle
+
 import base64
+import binascii
 import logging
+import os
 import xml.sax
 
 from xml.sax.handler import ContentHandler
@@ -63,13 +58,22 @@ from xml.sax.saxutils import XMLGenerator
 from xml.sax import SAXParseException
 
 from collections import deque
-from cStringIO import StringIO
+
+try:
+    # Use cStringIO by default as it is faster
+    from cStringIO import StringIO as BytesIO
+except ImportError:  # Python 3 compat
+    from io import BytesIO
 
 from ClusterShell import __version__
 from ClusterShell.Event import EventHandler
 
 
+# XML character encoding
 ENCODING = 'utf-8'
+
+# See Message.data_encode()
+DEFAULT_B64_LINE_LENGTH = 65536
 
 
 class MessageProcessingError(Exception):
@@ -109,10 +113,9 @@ class XMLReader(ContentHandler):
             self.msg_queue.appendleft(EndMessage())
 
     def characters(self, content):
-        """read content characters"""
+        """read content characters (always decoded string)"""
         if self._draft is not None:
-            content = content.decode(ENCODING)
-            self._draft.data_update(content)
+            self._draft.data_update(content.encode(ENCODING))
 
     def msg_available(self):
         """return whether a message is available for delivery or not"""
@@ -150,7 +153,7 @@ class XMLReader(ContentHandler):
 
 class Channel(EventHandler):
     """Use this event handler to establish a communication channel between to
-    hosts whithin the propagation tree.
+    hosts within the propagation tree.
 
     The endpoint's logic has to be implemented by subclassing the Channel class
     and overriding the start() and recv() methods.
@@ -201,30 +204,31 @@ class Channel(EventHandler):
     def _close(self):
         """close an already opened channel"""
         send_endtag = self.opened
-        # set to False before sending tag for state test purposes
-        self.opened = self.setup = False
         if send_endtag:
             XMLGenerator(self.worker, encoding=ENCODING).endElement('channel')
         self.worker.abort()
+        self.opened = self.setup = False
 
     def ev_start(self, worker):
         """connection established. Open higher level channel"""
         self.worker = worker
         self.start()
 
-    def ev_read(self, worker):
+    def ev_read(self, worker, node, sname, msg):
         """channel has data to read"""
-        raw = worker.current_msg
+        # sname can be either SNAME_READER or self.SNAME_ERROR
+        # TODO: special handler for SNAME_ERROR?
         try:
-            self._parser.feed(raw + '\n')
-        except SAXParseException, ex:
-            self.logger.error("SAXParseException: %s: %s", ex.getMessage(), raw)
+            self._parser.feed(msg + b'\n')
+        except SAXParseException as ex:
+            self.logger.error("SAXParseException: %s: %s", ex.getMessage(), msg)
             # Warning: do not send malformed raw message back
             if self.error_response:
                 self.send(ErrorMessage('Parse error: %s' % ex.getMessage()))
             self._close()
             return
-        except MessageProcessingError, ex:
+        except MessageProcessingError as ex:
+            self.logger.error("MessageProcessingError: %s", ex)
             if self.error_response:
                 self.send(ErrorMessage(str(ex)))
             self._close()
@@ -240,7 +244,7 @@ class Channel(EventHandler):
         """write an outgoing message as its XML representation"""
         #self.logger.debug('SENDING to worker %s: "%s"', id(self.worker),
         #                  msg.xml())
-        self.worker.write(msg.xml() + '\n', sname=self.SNAME_WRITER)
+        self.worker.write(msg.xml() + b'\n', sname=self.SNAME_WRITER)
 
     def start(self):
         """initialization logic"""
@@ -268,14 +272,28 @@ class Message(object):
 
     def data_encode(self, inst):
         """serialize an instance and store the result"""
-        self.data = base64.encodestring(cPickle.dumps(inst))
+        # Base64 transfer encoding for MIME mandates a fixed line length
+        # of 76 characters, which is way too small for our per-line ev_read
+        # mechanism. So use b64encode() here instead of encodestring().
+        encoded = base64.b64encode(cPickle.dumps(inst))
+
+        # We now follow relaxed RFC-4648 for base64, but we still add some
+        # newlines to very long lines to avoid memory pressure (eg. --rcopy).
+        # In RFC-4648, CRLF characters constitute "non-alphabet characters"
+        # and are ignored.
+        line_length = int(os.environ.get('CLUSTERSHELL_GW_B64_LINE_LENGTH',
+                                         DEFAULT_B64_LINE_LENGTH))
+        self.data = b'\n'.join(encoded[pos:pos+line_length]
+                               for pos in range(0, len(encoded), line_length))
 
     def data_decode(self):
         """deserialize a previously encoded instance and return it"""
+        # NOTE: name is confusing, data_decode() returns pickle-decoded bytes
+        #       (encoded string) and not (decoded) string...
         # if self.data is None then an exception is raised here
         try:
-            return cPickle.loads(base64.decodestring(self.data))
-        except (EOFError, TypeError):
+            return cPickle.loads(base64.b64decode(self.data))
+        except (EOFError, TypeError, cPickle.UnpicklingError, binascii.Error):
             # raised by cPickle.loads() if self.data is not valid
             raise MessageProcessingError('Message %s has an invalid payload'
                                          % self.ident)
@@ -284,7 +302,7 @@ class Message(object):
         """append data to the instance (used for deserialization)"""
         if self.has_payload:
             if self.data is None:
-                self.data = raw # first encoded packet
+                self.data = raw  # first encoded packet
             else:
                 self.data += raw
         else:
@@ -294,7 +312,7 @@ class Message(object):
 
     def selfbuild(self, attributes):
         """self construction from a table of attributes"""
-        for k, fmt in self.attr.iteritems():
+        for k, fmt in self.attr.items():
             try:
                 setattr(self, k, fmt(attributes[k]))
             except KeyError:
@@ -309,7 +327,7 @@ class Message(object):
 
     def xml(self):
         """generate XML version of a configuration message"""
-        out = StringIO()
+        out = BytesIO()
         generator = XMLGenerator(out, encoding=ENCODING)
 
         # "stringify" entries for XML conversion

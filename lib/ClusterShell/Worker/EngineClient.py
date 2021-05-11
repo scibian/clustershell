@@ -1,34 +1,22 @@
 #
-# Copyright CEA/DAM/DIF (2009-2014)
-#  Contributor: Stephane THIELL <stephane.thiell@cea.fr>
+# Copyright (C) 2009-2016 CEA/DAM
+# Copyright (C) 2016-2017 Stephane Thiell <sthiell@stanford.edu>
 #
-# This file is part of the ClusterShell library.
+# This file is part of ClusterShell.
 #
-# This software is governed by the CeCILL-C license under French law and
-# abiding by the rules of distribution of free software.  You can  use,
-# modify and/ or redistribute the software under the terms of the CeCILL-C
-# license as circulated by CEA, CNRS and INRIA at the following URL
-# "http://www.cecill.info".
+# ClusterShell is free software; you can redistribute it and/or
+# modify it under the terms of the GNU Lesser General Public
+# License as published by the Free Software Foundation; either
+# version 2.1 of the License, or (at your option) any later version.
 #
-# As a counterpart to the access to the source code and  rights to copy,
-# modify and redistribute granted by the license, users are provided only
-# with a limited warranty  and the software's author,  the holder of the
-# economic rights,  and the successive licensors  have only  limited
-# liability.
+# ClusterShell is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+# Lesser General Public License for more details.
 #
-# In this respect, the user's attention is drawn to the risks associated
-# with loading,  using,  modifying and/or developing or reproducing the
-# software by the user in light of its specific status of free software,
-# that may mean  that it is complicated to manipulate,  and  that  also
-# therefore means  that it is reserved for developers  and  experienced
-# professionals having in-depth computer knowledge. Users are therefore
-# encouraged to load and test the software's suitability as regards their
-# requirements in conditions enabling the security of their systems and/or
-# data to be ensured and,  more generally, to use and operate it in the
-# same conditions as regards security.
-#
-# The fact that you are presently reading this means that you have had
-# knowledge of the CeCILL-C license and that you accept its terms.
+# You should have received a copy of the GNU Lesser General Public
+# License along with ClusterShell; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 
 """
 EngineClient
@@ -41,14 +29,24 @@ and stderr, or even more...)
 """
 
 import errno
+import logging
 import os
-import Queue
-import thread
+
+try:
+    import queue
+except ImportError:
+    # Python 2 compatibility
+    import Queue as queue
+
+import threading
 
 from ClusterShell.Worker.fastsubprocess import Popen, PIPE, STDOUT, \
     set_nonblock_flag
 
 from ClusterShell.Engine.Engine import EngineBaseTimer, E_READ, E_WRITE
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 class EngineClientException(Exception):
@@ -81,8 +79,8 @@ class EngineClientStream(object):
         """
         self.name = name
         self.fd = None
-        self.rbuf = ""
-        self.wbuf = ""
+        self.rbuf = bytes()
+        self.wbuf = bytes()
         self.eof = False
         self.evmask = evmask
         self.events = 0
@@ -171,7 +169,7 @@ class EngineClientStreamDict(dict):
 
     def readers(self):
         """Get an iterator on all streams setup as readable."""
-        return (s for s in self.values() if s.evmask & E_READ)
+        return (s for s in list(self.values()) if s.evmask & E_READ)
 
     def active_writers(self):
         """Get an iterator on writable streams (with fd set)."""
@@ -179,7 +177,7 @@ class EngineClientStreamDict(dict):
 
     def writers(self):
         """Get an iterator on all streams setup as writable."""
-        return (s for s in self.values() if s.evmask & E_WRITE)
+        return (s for s in list(self.values()) if s.evmask & E_WRITE)
 
     def retained(self):
         """Check whether this set of streams is retained.
@@ -237,6 +235,12 @@ class EngineClient(EngineBaseTimer):
         # streams associated with this client
         self.streams = EngineClientStreamDict()
 
+    def __repr__(self):
+        # added repr(self.key)
+        return '<%s.%s instance at 0x%x key %r>' % (self.__module__,
+                                                    self.__class__.__name__,
+                                                    id(self), self.key)
+
     def _fire(self):
         """
         Fire timeout timer.
@@ -261,6 +265,8 @@ class EngineClient(EngineBaseTimer):
         """
         for sname in list(self.streams):
             self._close_stream(sname)
+
+        self.invalidate()  # set self._engine to None
 
     def _close_stream(self, sname):
         """
@@ -314,25 +320,34 @@ class EngineClient(EngineBaseTimer):
         wfile = self.streams[sname]
         if not wfile.wbuf and wfile.eof:
             # remove stream from engine (not directly)
-            self._engine.remove_stream(self, wfile)
+            if self._engine:
+                self._engine.remove_stream(self, wfile)
         elif len(wfile.wbuf) > 0:
             try:
                 wcnt = os.write(wfile.fd, wfile.wbuf)
-            except OSError, exc:
-                if (exc.errno == errno.EAGAIN):
+            except OSError as exc:
+                if exc.errno == errno.EAGAIN:
+                    # _handle_write() is not only called by the engine but also
+                    # by _write(), so this is legit: we just try again later
                     self._set_writing(sname)
+                    return
+                if exc.errno == errno.EPIPE:
+                    # broken pipe: log warning message and do NOT retry
+                    LOGGER.warning('%r: %s', self, exc)
                     return
                 raise
             if wcnt > 0:
-                self.worker._on_written(self.key, wcnt, sname)
                 # dequeue written buffer
                 wfile.wbuf = wfile.wbuf[wcnt:]
                 # check for possible ending
                 if wfile.eof and not wfile.wbuf:
+                    self.worker._on_written(self.key, wcnt, sname)
                     # remove stream from engine (not directly)
-                    self._engine.remove_stream(self, wfile)
+                    if self._engine:
+                        self._engine.remove_stream(self, wfile)
                 else:
                     self._set_writing(sname)
+                    self.worker._on_written(self.key, wcnt, sname)
 
     def _exec_nonblock(self, commandlist, shell=False, env=None):
         """
@@ -375,10 +390,10 @@ class EngineClient(EngineBaseTimer):
 
         buf = rfile.rbuf + readbuf
         lines = buf.splitlines(True)
-        rfile.rbuf = ""
+        rfile.rbuf = bytes()
         for line in lines:
-            if line.endswith('\n'):
-                if line.endswith('\r\n'):
+            if line.endswith(b'\n'):
+                if line.endswith(b'\r\n'):
                     yield line[:-2] # trim CRLF
                 else:
                     # trim LF
@@ -401,6 +416,11 @@ class EngineClient(EngineBaseTimer):
 
     def _set_write_eof(self, sname):
         """Set EOF on specific writable stream."""
+        if sname not in self.streams:
+            LOGGER.debug("stream %s was already closed on client %s, skipping",
+                         sname, self.key)
+            return
+
         wfile = self.streams[sname]
         wfile.eof = True
         if self._engine and wfile.fd and not wfile.wbuf:
@@ -408,9 +428,15 @@ class EngineClient(EngineBaseTimer):
             self._engine.remove_stream(self, wfile)
 
     def abort(self):
-        """Abort processing any action by this client."""
-        if self._engine:
-            self._engine.remove(self, abort=True)
+        """Abort processing any action by this client.
+
+        Safe to call on an already closing or aborting client.
+        """
+        engine = self._engine
+        if engine:
+            self.invalidate()  # set self._engine to None
+            engine.remove(self, abort=True)
+
 
 class EnginePort(EngineClient):
     """
@@ -418,7 +444,7 @@ class EnginePort(EngineClient):
     reliably between tasks.
     """
 
-    class _Msg:
+    class _Msg(object):
         """Private class representing a port message.
 
         A port message may be any Python object.
@@ -427,7 +453,7 @@ class EnginePort(EngineClient):
         def __init__(self, user_msg, sync):
             self._user_msg = user_msg
             self._sync_msg = sync
-            self.reply_lock = thread.allocate_lock()
+            self.reply_lock = threading.Lock()
             self.reply_lock.acquire()
 
         def get(self):
@@ -455,7 +481,7 @@ class EnginePort(EngineClient):
         self.delayable = False
 
         # Port messages queue
-        self._msgq = Queue.Queue(self.task.default("port_qlimit"))
+        self._msgq = queue.Queue(self.task.default("port_qlimit"))
 
         # Request pipe
         (readfd, writefd) = os.pipe()
@@ -478,12 +504,11 @@ class EnginePort(EngineClient):
                                                     id(self), fd_in, fd_out)
 
     def _start(self):
+        """Start port."""
         return self
 
     def _close(self, abort, timeout):
-        """
-        Close port pipes.
-        """
+        """Close port."""
         if not self._msgq.empty():
             # purge msgq
             try:
@@ -492,11 +517,12 @@ class EnginePort(EngineClient):
                     if self.task.info("debug", False):
                         self.task.info("print_debug")(self.task,
                             "EnginePort: dropped msg: %s" % str(pmsg.get()))
-            except Queue.Empty:
+            except queue.Empty:
                 pass
         self._msgq = None
         del self.streams['out']
         del self.streams['in']
+        self.invalidate()
 
     def _handle_read(self, sname):
         """
@@ -513,11 +539,19 @@ class EnginePort(EngineClient):
         """
         Port message send method that will wait for acknowledgement
         unless the send_once parameter if set.
+
+        May be called from another thread. Will generate ev_msg() on
+        Port event handler (in Port task/thread).
+
+        Return False if the message cannot be sent (eg. port closed).
         """
+        if self._msgq is None: # called after port closed?
+            return False
+
         pmsg = EnginePort._Msg(send_msg, not send_once)
         self._msgq.put(pmsg, block=True, timeout=None)
         try:
-            ret = os.write(self.streams['out'].fd, "M")
+            ret = os.write(self.streams['out'].fd, b'M')
         except OSError:
             raise
         pmsg.sync()
@@ -525,6 +559,8 @@ class EnginePort(EngineClient):
 
     def msg_send(self, send_msg):
         """
-        Port message send-once method (no acknowledgement).
+        Port message send-once method (no acknowledgement). See msg().
+
+        Return False if the message cannot be sent (eg. port closed).
         """
-        self.msg(send_msg, send_once=True)
+        return self.msg(send_msg, send_once=True)

@@ -1,34 +1,22 @@
 #
-# Copyright CEA/DAM/DIF (2007-2015)
-#  Contributor: Stephane THIELL <stephane.thiell@cea.fr>
+# Copyright (C) 2007-2016 CEA/DAM
+# Copyright (C) 2015-2016 Stephane Thiell <sthiell@stanford.edu>
 #
-# This file is part of the ClusterShell library.
+# This file is part of ClusterShell.
 #
-# This software is governed by the CeCILL-C license under French law and
-# abiding by the rules of distribution of free software.  You can  use,
-# modify and/ or redistribute the software under the terms of the CeCILL-C
-# license as circulated by CEA, CNRS and INRIA at the following URL
-# "http://www.cecill.info".
+# ClusterShell is free software; you can redistribute it and/or
+# modify it under the terms of the GNU Lesser General Public
+# License as published by the Free Software Foundation; either
+# version 2.1 of the License, or (at your option) any later version.
 #
-# As a counterpart to the access to the source code and  rights to copy,
-# modify and redistribute granted by the license, users are provided only
-# with a limited warranty  and the software's author,  the holder of the
-# economic rights,  and the successive licensors  have only  limited
-# liability.
+# ClusterShell is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+# Lesser General Public License for more details.
 #
-# In this respect, the user's attention is drawn to the risks associated
-# with loading,  using,  modifying and/or developing or reproducing the
-# software by the user in light of its specific status of free software,
-# that may mean  that it is complicated to manipulate,  and  that  also
-# therefore means  that it is reserved for developers  and  experienced
-# professionals having in-depth computer knowledge. Users are therefore
-# encouraged to load and test the software's suitability as regards their
-# requirements in conditions enabling the security of their systems and/or
-# data to be ensured and,  more generally, to use and operate it in the
-# same conditions as regards security.
-#
-# The fact that you are presently reading this means that you have had
-# knowledge of the CeCILL-C license and that you accept its terms.
+# You should have received a copy of the GNU Lesser General Public
+# License along with ClusterShell; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 
 """
 Interface of underlying Task's Engine.
@@ -44,12 +32,21 @@ import sys
 import time
 import traceback
 
+
+LOGGER = logging.getLogger(__name__)
+
 # Engine client fd I/O event interest bits
 E_READ = 0x1
 E_WRITE = 0x2
 
 # Define epsilon value for time float arithmetic operations
 EPSILON = 1.0e-3
+
+# Special fanout value for unlimited
+FANOUT_UNLIMITED = -1
+# Special fanout value to use default Engine fanout
+FANOUT_DEFAULT = None
+
 
 class EngineException(Exception):
     """
@@ -88,7 +85,7 @@ class EngineNotSupportedError(EngineException):
         self.engineid = engineid
 
 
-class EngineBaseTimer:
+class EngineBaseTimer(object):
     """
     Abstract class for ClusterShell's engine timer. Such a timer
     requires a relative fire time (delay) in seconds (as float), and
@@ -101,7 +98,14 @@ class EngineBaseTimer:
         """
         Create a base timer.
         """
-        self.fire_delay = fire_delay
+        # fire_delay is used for comparison between timers and MUST NOT be
+        # None in Python 3 as comparison with float is not possible and could
+        # lead to confusion anyway. If None is passed, fire_delay is now set
+        # to -1 to avoid the timer to be armed in _EngineTimerQ.schedule().
+        if fire_delay is None:
+            self.fire_delay = -1.0
+        else:
+            self.fire_delay = fire_delay
         self.interval = interval
         self.autoclose = autoclose
         self._engine = None
@@ -136,7 +140,7 @@ class EngineBaseTimer:
         """
         Set the next firing delay in seconds for an EngineTimer object.
 
-        The optional paramater `interval' sets the firing interval
+        The optional parameter `interval' sets the firing interval
         of the timer. If not specified, the timer fires once and then
         is automatically invalidated.
 
@@ -184,9 +188,9 @@ class EngineTimer(EngineBaseTimer):
     def _fire(self):
         self.eh.ev_timer(self)
 
-class _EngineTimerQ:
+class _EngineTimerQ(object):
 
-    class _EngineTimerCase:
+    class _EngineTimerCase(object):
         """
         Helper class that allows comparisons of fire times, to be easily used
         in an heapq.
@@ -198,7 +202,12 @@ class _EngineTimerQ:
             assert self.client.fire_delay > -EPSILON
             self.fire_date = self.client.fire_delay + time.time()
 
+        def __lt__(self, other):
+            # NOTE: add @total_ordering decorator in Python 2.7+
+            return self.fire_date < other.fire_date
+
         def __cmp__(self, other):
+            # DEPRECATED: no longer used in Python 3
             return cmp(self.fire_date, other.fire_date)
 
         def arm(self, client):
@@ -219,9 +228,8 @@ class _EngineTimerQ:
                 # Just print a debug message that could help detect issues
                 # coming from a long-running timer handler.
                 if self.fire_date < time_current:
-                    logging.getLogger(__name__).debug(
-                        "Warning: passed interval time for %r (long running "
-                        "event handler?)", self.client)
+                    LOGGER.debug("Warning: passed interval time for %r "
+                                 "(long running event handler?)", self.client)
 
         def disarm(self):
             client = self.client
@@ -279,7 +287,7 @@ class _EngineTimerQ:
             return
 
         if self.armed_count <= 0:
-            raise ValueError, "Engine client timer not found in timer queue"
+            raise ValueError("Engine client timer not found in timer queue")
 
         client._timercase.disarm()
         self.armed_count -= 1
@@ -351,7 +359,7 @@ class _EngineTimerQ:
         self.armed_count = 0
 
 
-class Engine:
+class Engine(object):
     """
     Base class for ClusterShell Engines.
 
@@ -374,12 +382,16 @@ class Engine:
         self._clients = set()
         self._ports = set()
 
-        # keep track of the number of registered clients (delayable only)
-        self.reg_clients = 0
+        # keep track of the number of registered clients per worker
+        # (this does not include ports)
+        self._reg_stats = {}
 
         # keep track of registered file descriptors in a dict where keys
         # are fileno and values are (EngineClient, EngineClientStream) tuples
         self.reg_clifds = {}
+
+        # fanout cache used to speed up client launch when fanout changed
+        self._prev_fanout = 0    # fanout_diff != 0 the first time
 
         # Current loop iteration counter. It is the number of performed engine
         # loops in order to keep track of client registration epoch, so we can
@@ -421,9 +433,28 @@ class Engine:
             if client._reg_epoch < self._current_loopcnt:
                 return client, stream
             else:
-                self._debug("ENGINE _fd2client: ignoring just re-used FD %d" \
-                            % stream.fd)
+                LOGGER.debug("_fd2client: ignoring just re-used FD %d",
+                             stream.fd)
         return (None, None)
+
+    def _can_register(self, client):
+        assert not client.registered
+
+        if not client.delayable or client.worker._fanout == FANOUT_UNLIMITED:
+            return True
+        elif client.worker._fanout is FANOUT_DEFAULT:
+            return self._reg_stats.get('default', 0) < self.info['fanout']
+        else:
+            worker = client.worker
+            return self._reg_stats.get(worker, 0) < worker._fanout
+
+    def _update_reg_stats(self, client, offset):
+        if client.worker._fanout is FANOUT_DEFAULT:
+            key = 'default'
+        else:
+            key = client.worker
+        self._reg_stats.setdefault(key, 0)
+        self._reg_stats[key] += offset
 
     def add(self, client):
         """Add a client to engine."""
@@ -437,12 +468,10 @@ class Engine:
             # add to port set (non-delayable)
             self._ports.add(client)
 
-        if self.running:
+        if self.running and self._can_register(client):
             # in-fly add if running
-            if not client.delayable:
-                self.register(client)
-            elif self.info["fanout"] > self.reg_clients:
-                self.register(client._start())
+            self.register(client._start())
+
 
     def _remove(self, client, abort, did_timeout=False):
         """Remove a client from engine (subroutine)."""
@@ -464,7 +493,8 @@ class Engine:
         else:
             self._ports.remove(client)
         self._remove(client, abort, did_timeout)
-        self.start_all()
+        # we just removed a client, so start pending client(s)
+        self.start_clients()
 
     def remove_stream(self, client, stream):
         """
@@ -472,10 +502,18 @@ class Engine:
         needed read flush as needed. If no more retainable stream
         remains for this client, this method automatically removes the
         entire client from engine.
+
+        This function does nothing if the stream is not registered.
         """
+        if stream.fd not in self.reg_clifds:
+            LOGGER.debug("remove_stream: %s not registered", stream)
+            return
+
         self.unregister_stream(client, stream)
+
         # _close_stream() will flush pending read buffers so may generate events
         client._close_stream(stream.name)
+
         # client may have been removed by previous events, if not check whether
         # some retained streams still remain
         if client in self._clients and not client.streams.retained():
@@ -511,7 +549,7 @@ class Engine:
         client._reg_epoch = self._current_loopcnt
 
         if client.delayable:
-            self.reg_clients += 1
+            self._update_reg_stats(client, 1)
 
         # set interest event bits...
         for streams, ievent in ((client.streams.active_readers, E_READ),
@@ -564,7 +602,7 @@ class Engine:
 
         client.registered = False
         if client.delayable:
-            self.reg_clients -= 1
+            self._update_reg_stats(client, -1)
 
     def modify(self, client, sname, setmask, clearmask):
         """Modify the next loop interest events bitset for a client stream."""
@@ -596,8 +634,7 @@ class Engine:
             (stream.new_events, stream.events, client, stream.name))
 
         if not client.registered:
-            logging.getLogger(__name__).debug( \
-                "set_events: client %s not registered" % self)
+            LOGGER.debug("set_events: client %s not registered", self)
             return
 
         chgbits = stream.new_events ^ stream.events
@@ -651,23 +688,21 @@ class Engine:
                 self._debug("START PORT %s" % port)
                 self.register(port)
 
-    def start_all(self):
-        """
-        Start and register all other possible clients, in respect of task
-        fanout.
-        """
-        # Get current fanout value
-        fanout = self.info["fanout"]
-        assert fanout > 0
-        if fanout <= self.reg_clients:
-            return
+    def start_clients(self):
+        """Start and register regular engine clients in respect of fanout."""
+        # check if engine fanout has changed
+        # NOTE: worker._fanout live changes not supported (see #323)
+        fanout_diff = self.info['fanout'] - self._prev_fanout
+        if fanout_diff:
+            self._prev_fanout = self.info['fanout']
 
-        # Register regular engine clients within the fanout limit
         for client in self._clients:
-            if not client.registered:
+            if not client.registered and self._can_register(client):
                 self._debug("START CLIENT %s" % client.__class__.__name__)
                 self.register(client._start())
-                if fanout <= self.reg_clients:
+                # if first time or engine fanout has changed, we do a full scan
+                if fanout_diff == 0:
+                    # if engine fanout has not changed, we only start 1 client
                     break
 
     def run(self, timeout):
@@ -676,42 +711,41 @@ class Engine:
         if self.running:
             raise EngineAlreadyRunningError()
 
-        # note: try-except-finally not supported before python 2.5
         try:
             self.running = True
+            # start port clients
+            self.start_ports()
+            # peek in ports for early pending messages
+            self.snoop_ports()
+            # start all other clients
+            self.start_clients()
+            # run loop until all clients and timers are removed
+            self.runloop(timeout)
+        except EngineTimeoutException:
+            self.clear(did_timeout=True)
+            raise
+        except: # MUST use BaseException as soon as possible (py2.5+)
+            # The game is over.
+            exc_t, exc_val, exc_tb = sys.exc_info()
             try:
-                # start port clients
-                self.start_ports()
-                # peek in ports for early pending messages
-                self.snoop_ports()
-                # start all other clients
-                self.start_all()
-                # run loop until all clients and timers are removed
-                self.runloop(timeout)
-            except EngineTimeoutException:
-                self.clear(did_timeout=True)
+                # Close Engine clients
+                self.clear()
+            except:
+                # self.clear() may still generate termination events that
+                # may raises exceptions, overriding the other one above.
+                # In the future, we should block new user events to avoid
+                # that. Also, such cases could be better handled with
+                # BaseException. For now, print a backtrace in debug to
+                # help detect the problem.
+                tbexc = traceback.format_exception(exc_t, exc_val, exc_tb)
+                LOGGER.debug(''.join(tbexc))
                 raise
-            except: # MUST use BaseException as soon as possible (py2.5+)
-                # The game is over.
-                exc_t, exc_val, exc_tb = sys.exc_info()
-                try:
-                    # Close Engine clients
-                    self.clear()
-                except:
-                    # self.clear() may still generate termination events that
-                    # may raises exceptions, overriding the other one above.
-                    # In the future, we should block new user events to avoid
-                    # that. Also, such cases could be better handled with
-                    # BaseException. For now, print a backtrace in debug to
-                    # help detect the problem.
-                    tbexc = traceback.format_exception(exc_t, exc_val, exc_tb)
-                    logging.getLogger(__name__).debug(''.join(tbexc))
-                    raise
-                raise
+            raise
         finally:
             # cleanup
             self.timerq.clear()
             self.running = False
+            self._prev_fanout = 0
 
     def snoop_ports(self):
         """
@@ -724,7 +758,7 @@ class Engine:
         for port in ports:
             try:
                 port._handle_read('in')
-            except (IOError, OSError), ex:
+            except (IOError, OSError) as ex:
                 if ex.errno in (errno.EAGAIN, errno.EWOULDBLOCK):
                     # no pending message
                     return
@@ -747,6 +781,6 @@ class Engine:
         return not self.running and self._exited
 
     def _debug(self, s):
-        """library engine debugging hook"""
-        #logging.getLogger(__name__).debug(s)
+        """library engine verbose debugging hook"""
+        #LOGGER.debug(s)
         pass
