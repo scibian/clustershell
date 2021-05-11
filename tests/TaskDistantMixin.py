@@ -1,25 +1,18 @@
-#!/usr/bin/env python
 # ClusterShell (distant) test suite
 # Written by S. Thiell
 
-
 """Unit test for ClusterShell Task (distant)"""
 
-import copy
 import pwd
 import shutil
-import sys
 import warnings
-
-sys.path.insert(0, '../lib')
 
 from TLib import HOSTNAME, make_temp_filename, make_temp_dir
 from ClusterShell.Event import EventHandler
-from ClusterShell.NodeSet import NodeSet
 from ClusterShell.Task import *
 from ClusterShell.Worker.Ssh import WorkerSsh
 from ClusterShell.Worker.EngineClient import *
-from ClusterShell.Worker.Worker import WorkerBadArgumentError
+from ClusterShell.Worker.Worker import FANOUT_UNLIMITED, WorkerBadArgumentError
 
 import socket
 
@@ -41,28 +34,23 @@ class TaskDistantMixin(object):
     def testLocalhostCommand(self):
         # init worker
         worker = self._task.shell("/bin/hostname", nodes=HOSTNAME)
-        self.assert_(worker != None)
         # run task
         self._task.resume()
 
     def testLocalhostCommand2(self):
         # init worker
         worker = self._task.shell("/bin/hostname", nodes=HOSTNAME)
-        self.assert_(worker != None)
 
         worker = self._task.shell("/bin/uname -r", nodes=HOSTNAME)
-        self.assert_(worker != None)
         # run task
         self._task.resume()
 
     def testTaskShellWorkerGetCommand(self):
         worker1 = self._task.shell("/bin/hostname", nodes=HOSTNAME)
-        self.assert_(worker1 != None)
         worker2 = self._task.shell("/bin/uname -r", nodes=HOSTNAME)
-        self.assert_(worker2 != None)
         self._task.resume()
-        self.assert_(hasattr(worker1, 'command'))
-        self.assert_(hasattr(worker2, 'command'))
+        self.assertTrue(hasattr(worker1, 'command'))
+        self.assertTrue(hasattr(worker2, 'command'))
         self.assertEqual(worker1.command, "/bin/hostname")
         self.assertEqual(worker2.command, "/bin/uname -r")
 
@@ -99,11 +87,10 @@ class TaskDistantMixin(object):
             dest = make_temp_filename(suffix='LocalhostCopyF2')
             worker = self._task.copy("/etc/hosts", dest,
                                      nodes='unlikely-node,%s' % HOSTNAME)
-            self.assert_(worker != None)
             # run task
             self._task.resume()
-            self.assert_(worker.node_buffer("unlikely-node") is None)
-            self.assert_(len(worker.node_error_buffer("unlikely-node")) > 2)
+            self.assertTrue(worker.node_buffer("unlikely-node") is None)
+            self.assertTrue(len(worker.node_error_buffer("unlikely-node")) > 2)
             os.unlink(dest)
         finally:
             self._task.set_default("stderr", False)
@@ -116,10 +103,9 @@ class TaskDistantMixin(object):
             os.mkdir(os.path.join(dtmp_src, "lev1_b"))
             os.mkdir(os.path.join(dtmp_src, "lev1_a", "lev2"))
             worker = self._task.copy(dtmp_src, dtmp_dst, nodes=HOSTNAME)
-            self.assert_(worker != None)
             self._task.resume()
-            self.assert_(os.path.exists(os.path.join(dtmp_dst, \
-                os.path.basename(dtmp_src), "lev1_a", "lev2")))
+            self.assertTrue(os.path.exists(os.path.join(dtmp_dst,
+                            os.path.basename(dtmp_src), "lev1_a", "lev2")))
         finally:
             shutil.rmtree(dtmp_dst, ignore_errors=True)
             shutil.rmtree(dtmp_src, ignore_errors=True)
@@ -165,10 +151,9 @@ class TaskDistantMixin(object):
                                handler=None)
             self._task.schedule(worker)
             self._task.resume()
-            self.assertTrue(os.path.exists(
-                            os.path.join(dtmp_dst,
-                                         os.path.basename(dtmp_src),
-                                         "lev1_a", "lev2")))
+            path = os.path.join(dtmp_dst, os.path.basename(dtmp_src), "lev1_a",
+                                "lev2")
+            self.assertTrue(os.path.exists(path))
         finally:
             shutil.rmtree(dtmp_dst, ignore_errors=True)
             shutil.rmtree(dtmp_src, ignore_errors=True)
@@ -184,8 +169,8 @@ class TaskDistantMixin(object):
                                handler=None, timeout=10, preserve=True)
             self._task.schedule(worker)
             self._task.resume()
-            self.assert_(os.path.exists(os.path.join(dtmp_dst, \
-                os.path.basename(dtmp_src), "lev1_a", "lev2")))
+            self.assertTrue(os.path.exists(os.path.join(dtmp_dst,
+                            os.path.basename(dtmp_src), "lev1_a", "lev2")))
         finally:
             shutil.rmtree(dtmp_dst, ignore_errors=True)
             shutil.rmtree(dtmp_src, ignore_errors=True)
@@ -197,7 +182,7 @@ class TaskDistantMixin(object):
         # run task
         self._task.resume()
         # test output
-        self.assertEqual(worker.node_buffer(HOSTNAME), "alright")
+        self.assertEqual(worker.node_buffer(HOSTNAME), b"alright")
 
     def testExplicitSshWorkerWithOptions(self):
         self._task.set_info("ssh_path", "/usr/bin/ssh -C")
@@ -207,7 +192,7 @@ class TaskDistantMixin(object):
         # run task
         self._task.resume()
         # test output
-        self.assertEqual(worker.node_buffer(HOSTNAME), "alright")
+        self.assertEqual(worker.node_buffer(HOSTNAME), b"alright")
         # clear options after test
         task_cleanup()
         self.assertEqual(task_self().info("ssh_path"), None)
@@ -220,7 +205,7 @@ class TaskDistantMixin(object):
         # run task
         self._task.resume()
         # test output
-        self.assertEqual(worker.node_error_buffer(HOSTNAME), "alright")
+        self.assertEqual(worker.node_error_buffer(HOSTNAME), b"alright")
 
         # Re-test with stderr=False
         worker = WorkerSsh(HOSTNAME, command="/bin/echo alright 1>&2",
@@ -271,7 +256,6 @@ class TaskDistantMixin(object):
         # init worker
         test_eh = self.__class__.TEventHandlerChecker(self)
         worker = self._task.shell("/bin/hostname", nodes=HOSTNAME, handler=test_eh)
-        self.assert_(worker != None)
         # run task
         self._task.resume()
         # test events received: start, read, hup, close
@@ -280,14 +264,14 @@ class TaskDistantMixin(object):
     def testShellEventsWithTimeout(self):
         # init worker
         test_eh = self.__class__.TEventHandlerChecker(self)
-        worker = self._task.shell("/bin/echo alright && /bin/sleep 10", nodes=HOSTNAME, handler=test_eh,
-                timeout=2)
+        worker = self._task.shell("/bin/echo alright && /bin/sleep 10",
+                                  nodes=HOSTNAME, handler=test_eh, timeout=2)
         self.assertTrue(worker != None)
         # run task
         self._task.resume()
         # test events received: start, read, timeout, close
         self.assertEqual(test_eh.flags, EV_START | EV_PICKUP | EV_READ | EV_TIMEOUT | EV_CLOSE)
-        self.assertEqual(worker.node_buffer(HOSTNAME), "alright")
+        self.assertEqual(worker.node_buffer(HOSTNAME), b"alright")
         self.assertEqual(worker.num_timeout(), 1)
         self.assertEqual(self._task.num_timeout(), 1)
         count = 0
@@ -304,20 +288,18 @@ class TaskDistantMixin(object):
     def testShellEventsWithTimeout2(self):
         # init worker
         test_eh1 = self.__class__.TEventHandlerChecker(self)
-        worker1 = self._task.shell("/bin/echo alright && /bin/sleep 10", nodes=HOSTNAME, handler=test_eh1,
-                timeout=2)
-        self.assert_(worker1 != None)
+        worker1 = self._task.shell("/bin/echo alright && /bin/sleep 10",
+                                   nodes=HOSTNAME, handler=test_eh1, timeout=2)
         test_eh2 = self.__class__.TEventHandlerChecker(self)
-        worker2 = self._task.shell("/bin/echo okay && /bin/sleep 10", nodes=HOSTNAME, handler=test_eh2,
-                timeout=3)
-        self.assert_(worker2 != None)
+        worker2 = self._task.shell("/bin/echo okay && /bin/sleep 10",
+                                   nodes=HOSTNAME, handler=test_eh2, timeout=3)
         # run task
         self._task.resume()
         # test events received: start, read, timeout, close
         self.assertEqual(test_eh1.flags, EV_START | EV_PICKUP | EV_READ | EV_TIMEOUT | EV_CLOSE)
         self.assertEqual(test_eh2.flags, EV_START | EV_PICKUP | EV_READ | EV_TIMEOUT | EV_CLOSE)
-        self.assertEqual(worker1.node_buffer(HOSTNAME), "alright")
-        self.assertEqual(worker2.node_buffer(HOSTNAME), "okay")
+        self.assertEqual(worker1.node_buffer(HOSTNAME), b"alright")
+        self.assertEqual(worker2.node_buffer(HOSTNAME), b"okay")
         self.assertEqual(worker1.num_timeout(), 1)
         self.assertEqual(worker2.num_timeout(), 1)
         self.assertEqual(self._task.num_timeout(), 2)
@@ -326,18 +308,16 @@ class TaskDistantMixin(object):
         # init worker
         test_eh = self.__class__.TEventHandlerChecker(self)
         worker = self._task.shell("/bin/echo -n okay", nodes=HOSTNAME, handler=test_eh)
-        self.assert_(worker != None)
         # run task
         self._task.resume()
         # test events received: start, close
         self.assertEqual(test_eh.flags, EV_START | EV_PICKUP | EV_READ | EV_HUP | EV_CLOSE)
-        self.assertEqual(worker.node_buffer(HOSTNAME), "okay")
+        self.assertEqual(worker.node_buffer(HOSTNAME), b"okay")
 
     def testShellEventsNoReadNoTimeout(self):
         # init worker
         test_eh = self.__class__.TEventHandlerChecker(self)
         worker = self._task.shell("/bin/sleep 2", nodes=HOSTNAME, handler=test_eh)
-        self.assert_(worker != None)
         # run task
         self._task.resume()
         # test events received: start, close
@@ -350,7 +330,6 @@ class TaskDistantMixin(object):
         # init worker
         for i in range(0, 10):
             worker = self._task.shell("/bin/echo %d" % i, nodes=HOSTNAME)
-            self.assert_(worker != None)
         # run task
         self._task.resume()
         # restore fanout value
@@ -366,7 +345,7 @@ class TaskDistantMixin(object):
         cnt = 2
         for buf, nodes in worker.iter_buffers():
             cnt -= 1
-            if buf == "foo\nbar\nxxx\n":
+            if buf == b"foo\nbar\nxxx\n":
                 self.assertEqual(len(nodes), 1)
                 self.assertEqual(str(nodes), HOSTNAME)
         self.assertEqual(cnt, 1)
@@ -379,7 +358,7 @@ class TaskDistantMixin(object):
             self.assertFalse("Found buffer with empty match_keys?!")
         for buf, nodes in worker.iter_buffers([HOSTNAME]):
             cnt -= 1
-            if buf == "foo\nbar\nxxx\n":
+            if buf == b"foo\nbar\nxxx\n":
                 self.assertEqual(len(nodes), 1)
                 self.assertEqual(str(nodes), HOSTNAME)
         self.assertEqual(cnt, 0)
@@ -397,7 +376,7 @@ class TaskDistantMixin(object):
         cnt = 2
         for buf, nodes in worker.iter_errors():
             cnt -= 1
-            if buf == "foo\nbar\nxxx\n":
+            if buf == b"foo\nbar\nxxx\n":
                 self.assertEqual(len(nodes), 1)
                 self.assertEqual(str(nodes), HOSTNAME)
         self.assertEqual(cnt, 1)
@@ -410,7 +389,7 @@ class TaskDistantMixin(object):
             self.assertFalse("Found error buffer with empty match_keys?!")
         for buf, nodes in worker.iter_errors([HOSTNAME]):
             cnt -= 1
-            if buf == "foo\nbar\nxxx\n":
+            if buf == b"foo\nbar\nxxx\n":
                 self.assertEqual(len(nodes), 1)
                 self.assertEqual(str(nodes), HOSTNAME)
         self.assertEqual(cnt, 0)
@@ -420,7 +399,6 @@ class TaskDistantMixin(object):
 
     def testWorkerNodeBuffers(self):
         task = task_self()
-        self.assert_(task != None)
 
         worker = task.shell("/usr/bin/printf 'foo\nbar\nxxx\n'",
                             nodes=HOSTNAME)
@@ -430,13 +408,12 @@ class TaskDistantMixin(object):
         cnt = 1
         for node, buf in worker.iter_node_buffers():
             cnt -= 1
-            if buf == "foo\nbar\nxxx\n":
+            if buf == b"foo\nbar\nxxx\n":
                 self.assertEqual(node, HOSTNAME)
         self.assertEqual(cnt, 0)
 
     def testWorkerNodeErrors(self):
         task = task_self()
-        self.assert_(task != None)
 
         worker = task.shell("/usr/bin/printf 'foo\nbar\nxxx\n' 1>&2",
                             nodes=HOSTNAME, stderr=True)
@@ -446,13 +423,12 @@ class TaskDistantMixin(object):
         cnt = 1
         for node, buf in worker.iter_node_errors():
             cnt -= 1
-            if buf == "foo\nbar\nxxx\n":
+            if buf == b"foo\nbar\nxxx\n":
                 self.assertEqual(node, HOSTNAME)
         self.assertEqual(cnt, 0)
 
     def testWorkerRetcodes(self):
         task = task_self()
-        self.assert_(task != None)
 
         worker = task.shell("/bin/sh -c 'exit 3'", nodes=HOSTNAME)
 
@@ -463,7 +439,7 @@ class TaskDistantMixin(object):
             cnt -= 1
             self.assertEqual(rc, 3)
             self.assertEqual(len(keys), 1)
-            self.assert_(keys[0] == HOSTNAME)
+            self.assertEqual(keys[0], HOSTNAME)
 
         self.assertEqual(cnt, 1)
 
@@ -471,7 +447,7 @@ class TaskDistantMixin(object):
             cnt -= 1
             self.assertEqual(rc, 3)
             self.assertEqual(len(keys), 1)
-            self.assert_(keys[0] == HOSTNAME)
+            self.assertEqual(keys[0], HOSTNAME)
 
         self.assertEqual(cnt, 0)
 
@@ -487,7 +463,6 @@ class TaskDistantMixin(object):
 
     def testWorkerNodeRetcodes(self):
         task = task_self()
-        self.assert_(task != None)
 
         worker = task.shell("/bin/sh -c 'exit 3'", nodes=HOSTNAME)
 
@@ -502,24 +477,25 @@ class TaskDistantMixin(object):
         self.assertEqual(cnt, 0)
 
     def testEscape(self):
-        worker = self._task.shell("export CSTEST=foobar; /bin/echo \$CSTEST | sed 's/\ foo/bar/'", nodes=HOSTNAME)
+        cmd = r"export CSTEST=foobar; /bin/echo \$CSTEST | sed 's/\ foo/bar/'"
+        worker = self._task.shell(cmd, nodes=HOSTNAME)
         # execute
         self._task.resume()
         # read result
-        self.assertEqual(worker.node_buffer(HOSTNAME), "$CSTEST")
+        self.assertEqual(worker.node_buffer(HOSTNAME), b"$CSTEST")
 
     def testEscape2(self):
-        worker = self._task.shell("export CSTEST=foobar; /bin/echo $CSTEST | sed 's/\ foo/bar/'", nodes=HOSTNAME)
+        cmd = r"export CSTEST=foobar; /bin/echo $CSTEST | sed 's/\ foo/bar/'"
+        worker = self._task.shell(cmd, nodes=HOSTNAME)
         # execute
         self._task.resume()
         # read result
-        self.assertEqual(worker.node_buffer(HOSTNAME), "foobar")
+        self.assertEqual(worker.node_buffer(HOSTNAME), b"foobar")
 
     def testSshUserOption(self):
         ssh_user_orig = self._task.info("ssh_user")
         self._task.set_info("ssh_user", pwd.getpwuid(os.getuid())[0])
         worker = self._task.shell("/bin/echo foobar", nodes=HOSTNAME)
-        self.assert_(worker != None)
         self._task.resume()
         # restore original ssh_user (None)
         self.assertEqual(ssh_user_orig, None)
@@ -530,7 +506,6 @@ class TaskDistantMixin(object):
         self._task.set_info("ssh_user", pwd.getpwuid(os.getuid())[0])
         dest = make_temp_filename('testLocalhostCopyU')
         worker = self._task.copy("/etc/hosts", dest, nodes=HOSTNAME)
-        self.assert_(worker != None)
         self._task.resume()
         # restore original ssh_user (None)
         self.assertEqual(ssh_user_orig, None)
@@ -542,16 +517,14 @@ class TaskDistantMixin(object):
         try:
             self._task.set_info("ssh_options", "-oLogLevel=QUIET")
             worker = self._task.shell("/bin/echo foobar", nodes=HOSTNAME)
-            self.assert_(worker != None)
             self._task.resume()
-            self.assertEqual(worker.node_buffer(HOSTNAME), "foobar")
+            self.assertEqual(worker.node_buffer(HOSTNAME), b"foobar")
             # test 3 options
             self._task.set_info("ssh_options", \
                 "-oLogLevel=QUIET -oStrictHostKeyChecking=no -oVerifyHostKeyDNS=no")
             worker = self._task.shell("/bin/echo foobar3", nodes=HOSTNAME)
-            self.assert_(worker != None)
             self._task.resume()
-            self.assertEqual(worker.node_buffer(HOSTNAME), "foobar3")
+            self.assertEqual(worker.node_buffer(HOSTNAME), b"foobar3")
         finally:
             # restore original ssh_user (None)
             self.assertEqual(ssh_options_orig, None)
@@ -567,9 +540,8 @@ class TaskDistantMixin(object):
             self._task.set_info("ssh_options", \
                 "-oLogLevel=QUIET -oStrictHostKeyChecking=no -oVerifyHostKeyDNS=no")
             worker = self._task.copy("/etc/hosts", testfile, nodes=HOSTNAME)
-            self.assert_(worker != None)
             self._task.resume()
-            self.assert_(os.path.exists(testfile))
+            self.assertTrue(os.path.exists(testfile))
         finally:
             os.unlink(testfile)
             # restore original ssh_user (None)
@@ -579,51 +551,51 @@ class TaskDistantMixin(object):
     def testShellStderrWithHandler(self):
         class StdErrHandler(EventHandler):
             def ev_error(self, worker):
-                assert worker.current_errmsg == "something wrong"
+                assert worker.current_errmsg == b"something wrong"
 
         worker = self._task.shell("echo something wrong 1>&2", nodes=HOSTNAME,
                                   handler=StdErrHandler(), stderr=True)
         self._task.resume()
         for buf, nodes in worker.iter_errors():
-            self.assertEqual(buf, "something wrong")
+            self.assertEqual(buf, b"something wrong")
         for buf, nodes in worker.iter_errors([HOSTNAME]):
-            self.assertEqual(buf, "something wrong")
+            self.assertEqual(buf, b"something wrong")
 
     def testShellWriteSimple(self):
         worker = self._task.shell("cat", nodes=HOSTNAME)
-        worker.write("this is a test\n")
+        worker.write(b"this is a test\n")
         worker.set_write_eof()
         self._task.resume()
-        self.assertEqual(worker.node_buffer(HOSTNAME), "this is a test")
+        self.assertEqual(worker.node_buffer(HOSTNAME), b"this is a test")
 
     def testShellWriteHandler(self):
         class WriteOnReadHandler(EventHandler):
             def __init__(self, target_worker):
                 self.target_worker = target_worker
             def ev_read(self, worker):
-                self.target_worker.write("%s:%s\n" % worker.last_read())
+                self.target_worker.write(worker.current_node.encode('utf-8')
+                                         + b':' + worker.current_msg + b'\n')
                 self.target_worker.set_write_eof()
 
         reader = self._task.shell("cat", nodes=HOSTNAME)
         worker = self._task.shell("sleep 1; echo foobar", nodes=HOSTNAME,
                                   handler=WriteOnReadHandler(reader))
         self._task.resume()
-        self.assertEqual(reader.node_buffer(HOSTNAME), "%s:foobar" % HOSTNAME)
+        res = "%s:foobar" % HOSTNAME
+        self.assertEqual(reader.node_buffer(HOSTNAME), res.encode('utf-8'))
 
     def testSshBadArgumentOption(self):
-	# Check code < 1.4 compatibility
-        self.assertRaises(WorkerBadArgumentError, WorkerSsh, HOSTNAME,
-			  None, None)
-	# As of 1.4, ValueError is raised for missing parameter
-        self.assertRaises(ValueError, WorkerSsh, HOSTNAME,
-			  None, None) # 1.4+
+        # Check code < 1.4 compatibility
+        self.assertRaises(WorkerBadArgumentError, WorkerSsh, HOSTNAME, None,
+                          None)
+        # As of 1.4, ValueError is raised for missing parameter
+        self.assertRaises(ValueError, WorkerSsh, HOSTNAME, None, None) # 1.4+
 
     def testCopyEvents(self):
         test_eh = self.__class__.TEventHandlerChecker(self)
         dest = make_temp_filename('testLocalhostCopyEvents')
         worker = self._task.copy("/etc/hosts", dest, nodes=HOSTNAME,
-                handler=test_eh)
-        self.assert_(worker != None)
+                                 handler=test_eh)
         # run task
         self._task.resume()
         os.unlink(dest)
@@ -631,7 +603,6 @@ class TaskDistantMixin(object):
 
     def testWorkerAbort(self):
         task = task_self()
-        self.assert_(task != None)
 
         # Test worker.abort() in an event handler.
         class AbortOnTimer(EventHandler):
@@ -641,6 +612,7 @@ class TaskDistantMixin(object):
                 self.testtimer = False
             def ev_timer(self, timer):
                 self.ext_worker.abort()
+                self.ext_worker.abort()  # safe but no effect
                 self.testtimer = True
 
         aot = AbortOnTimer(task.shell("sleep 10", nodes=HOSTNAME))
@@ -675,13 +647,13 @@ class TaskDistantMixin(object):
     def testLocalhostExplicitSshReverseCopy(self):
         dest = make_temp_dir('testLocalhostExplicitSshRCopy')
         try:
-            worker = WorkerSsh(HOSTNAME, source="/etc/hosts",
-                    dest=dest, handler=None, timeout=10, reverse=True)
+            worker = WorkerSsh(HOSTNAME, source="/etc/hosts", dest=dest,
+                               handler=None, timeout=10, reverse=True)
             self._task.schedule(worker)
             self._task.resume()
             self.assertEqual(worker.source, "/etc/hosts")
             self.assertEqual(worker.dest, dest)
-            self.assert_(os.path.exists(os.path.join(dest, "hosts.%s" % HOSTNAME)))
+            self.assertTrue(os.path.exists(os.path.join(dest, "hosts.%s" % HOSTNAME)))
         finally:
             shutil.rmtree(dest, ignore_errors=True)
 
@@ -692,11 +664,11 @@ class TaskDistantMixin(object):
             os.mkdir(os.path.join(dtmp_src, "lev1_a"))
             os.mkdir(os.path.join(dtmp_src, "lev1_b"))
             os.mkdir(os.path.join(dtmp_src, "lev1_a", "lev2"))
-            worker = WorkerSsh(HOSTNAME, source=dtmp_src,
-                    dest=dtmp_dst, handler=None, timeout=30, reverse=True)
+            worker = WorkerSsh(HOSTNAME, source=dtmp_src, dest=dtmp_dst,
+                               handler=None, timeout=30, reverse=True)
             self._task.schedule(worker)
             self._task.resume()
-            self.assert_(os.path.exists(os.path.join(dtmp_dst, \
+            self.assertTrue(os.path.exists(os.path.join(dtmp_dst,
                 "%s.%s" % (os.path.basename(dtmp_src), HOSTNAME), "lev1_a", "lev2")))
         finally:
             shutil.rmtree(dtmp_dst, ignore_errors=True)
@@ -709,11 +681,11 @@ class TaskDistantMixin(object):
             os.mkdir(os.path.join(dtmp_src, "lev1_a"))
             os.mkdir(os.path.join(dtmp_src, "lev1_b"))
             os.mkdir(os.path.join(dtmp_src, "lev1_a", "lev2"))
-            worker = WorkerSsh(HOSTNAME, source=dtmp_src,
-                    dest=dtmp_dst, handler=None, timeout=30, reverse=True)
+            worker = WorkerSsh(HOSTNAME, source=dtmp_src, dest=dtmp_dst,
+                               handler=None, timeout=30, reverse=True)
             self._task.schedule(worker)
             self._task.resume()
-            self.assert_(os.path.exists(os.path.join(dtmp_dst, \
+            self.assertTrue(os.path.exists(os.path.join(dtmp_dst,
                 "%s.%s" % (os.path.basename(dtmp_src), HOSTNAME), "lev1_a", "lev2")))
         finally:
             shutil.rmtree(dtmp_dst, ignore_errors=True)
@@ -724,7 +696,6 @@ class TaskDistantMixin(object):
             self._task.set_info("ssh_path", "/wrong/path/to/ssh")
             # init worker
             worker = self._task.shell("/bin/echo ok", nodes=HOSTNAME)
-            self.assert_(worker != None)
             # run task
             self._task.resume()
             self.assertEqual(self._task.max_retcode(), 255)
@@ -765,27 +736,23 @@ class TaskDistantMixin(object):
         self.assertEqual(test_eh.close_count, 1)
 
     def test_last_deprecated(self):
-        # Currently does not really test DeprecationWarning but will display
-        # them.
-        # Laster with Python 2.6+, we will be able to use
-        # "with warnings.catch_warnings".
-
-        # Cause all warnings to always be triggered.
-        warnings.simplefilter("always")
 
         class TestHandlerHandler(EventHandler):
             def ev_read(self, worker):
-                # XXX with Python 2.6+ use:
-                #with warnings.catch_warnings(record=True) as w:
-                self.node, self.msg = worker.last_read()
+                with warnings.catch_warnings(record=True) as wngs:
+                    warnings.simplefilter("always")
+                    self.node, self.msg = worker.last_read()
+                    assert len(wngs) == 1
+                    assert issubclass(wngs[-1].category, DeprecationWarning)
             def ev_hup(self, worker):
-                # XXX with Python 2.6+ use:
-                #with warnings.catch_warnings(record=True) as w:
-                self.node, self.rc = worker.last_retcode()
+                with warnings.catch_warnings(record=True) as wngs:
+                    warnings.simplefilter("always")
+                    self.node, self.rc = worker.last_retcode()
+                    assert len(wngs) == 1
+                    assert issubclass(wngs[-1].category, DeprecationWarning)
 
         eh = TestHandlerHandler()
         reader = self._task.shell("echo foobar", nodes=HOSTNAME, handler=eh)
         self._task.resume()
         self.assertEqual(eh.node, HOSTNAME)
         self.assertEqual(eh.rc, 0)
-        warnings.simplefilter('default')

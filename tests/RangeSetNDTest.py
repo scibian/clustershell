@@ -1,14 +1,10 @@
-#!/usr/bin/env python
 # ClusterShell.RangeSet.RangeSetND test suite
 # Written by S. Thiell
-
 
 """Unit test for RangeSetND"""
 
 import sys
 import unittest
-
-sys.path.insert(0, '../lib')
 
 from ClusterShell.RangeSet import RangeSet, RangeSetND
 
@@ -162,6 +158,11 @@ class RangeSetNDTest(unittest.TestCase):
                      "0-2; 1-2; 0-4\n3; 1-2; 0-5\n", 42)
         self._testRS([["0-2", "1-2", "0-4"], ["1-3", "1-3", "0-4"]],
                      "1-2; 1-3; 0-4\n0,3; 1-2; 0-4\n3; 3; 0-4\n", 55)
+
+        # triggers full expand heuristic
+        veclist = [item for x in range(0, 22, 2) for item in [(x,0), (x,1)]]
+        self._testRS(veclist, "0-20/2; 0-1\n", 22)
+
         # the following test triggers folding loop protection
         self._testRS([["0-100", "50-200"], ["2-101", "49"]],
                      "0-100; 50-200\n2-101; 49\n", 15351)
@@ -459,6 +460,18 @@ class RangeSetNDTest(unittest.TestCase):
         self.assertEqual(str(rn1), "02-06; 006-009,411\n01-02; 003-004\n")
         self.assertEqual(len(rn1), 29)
         self.assertEqual(rn1.pads(), (2, 3))
+        # Note: padding mismatch is NOT supported by ClusterShell
+        # We just track any regressions here (MAY CHANGE!)
+        rn1 = RangeSetND([['01-02', '003'], ['01-02', '0101'], ['02-06', '006-009,411']])
+        # here 0101 padding is changed to 101
+        self.assertEqual(str(rn1), '02-06; 006-009,411\n01-02; 003,101\n')
+        self.assertEqual(len(rn1), 29)
+        self.assertEqual(rn1.pads(), (2, 3))
+        rn1 = RangeSetND([['01-02', '0003'], ['01-02', '004'], ['02-06', '006-009,411']])
+        # here 004 padding is changed to 0004
+        self.assertEqual(str(rn1), '02-06; 006-009,411\n01-02; 0003-0004\n')
+        self.assertEqual(len(rn1), 29)
+        self.assertEqual(rn1.pads(), (2, 4)) # pads() returns max padding length by axis
 
     def test_mutability_1(self):
         rs0 = RangeSet("2-5")

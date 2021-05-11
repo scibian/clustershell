@@ -10,13 +10,14 @@ node groups, at the command line level. As it is very user-friendly and
 efficient, the *nodeset* command can quickly improve traditional cluster
 shell scripts. It is also full-featured as it provides most of the
 :class:`.NodeSet` and :class:`.RangeSet` class methods (see also
-:ref:`class-NodeSet`, and :ref:`class-RangeSet`). Most of the examples in this
-section are using simple indexed node sets, however, *nodeset* supports
-multidimensional node sets, like *dc[1-2]n[1-99]*, introduced in version 1.7
-(see :ref:`class-RangeSetND` for more info).
+:ref:`class-NodeSet`, and :ref:`class-RangeSet`).
 
-This section will guide you through the basics and also advanced features of
-*nodeset*.
+Most of the examples in this section are using simple indexed node sets,
+however, *nodeset* supports multidimensional node sets, like *dc[1-2]n[1-99]*,
+introduced in version 1.7 (see :ref:`class-RangeSetND` for more info).
+
+This section will guide you through the basics and also more advanced features
+of *nodeset*.
 
 Usage basics
 ^^^^^^^^^^^^
@@ -25,8 +26,10 @@ One exclusive command must be specified to *nodeset*, for example::
 
     $ nodeset --expand node[13-15,17-19]
     node13 node14 node15 node17 node18 node19
+
     $ nodeset --count node[13-15,17-19]
     6
+
     $ nodeset --fold node1-ipmi node2-ipmi node3-ipmi
     node[1-3]-ipmi
 
@@ -171,28 +174,29 @@ change::
 
 The ``-O, --output-format`` option can be used to format output results of
 most *nodeset* commands. The string passed to this option is used as a base
-format pattern applied to each result. The default format string is *"%s"*.
-Formatting is performed using the Python builtin string formatting operator,
-so you must use one format operator of the right type (*%s* is guaranteed to
-work in all cases). A simple example when using the fold command is shown
-below::
-
-    $ nodeset --output-format='%s-ipmi' -f node1 node2 node3
-    node[1-3]-ipmi
-
-Another output formatting example when using the expand command::
+format pattern applied to each node or each result (depending on the command
+and other options requested). The default format string is *"%s"*.  Formatting
+is performed using the Python builtin string formatting operator, so you must
+use one format operator of the right type (*%s* is guaranteed to work in all
+cases). Here is an output formatting example when using the expand command::
 
     $ nodeset --output-format='%s-ipmi' -e node[1-2]x[1-2]
     node1x1-ipmi node1x2-ipmi node2x1-ipmi node2x2-ipmi
 
-Output formatting and separator may be combined when using the expand
-command::
+Output formatting and separator combined can be useful when using the expand
+command, as shown here::
 
     $ nodeset -O '%s-ipmi' -S '\n' -e node[1-2]x[1-2]
     node1x1-ipmi
     node1x2-ipmi
     node2x1-ipmi
     node2x2-ipmi
+
+When using the output formatting option along with the folding command, the
+format is applied to each node but the result is still folded::
+
+    $ nodeset -O '%s-ipmi' -f mgmt1 mgmt2 login[1-4]
+    login[1-4]-ipmi,mgmt[1-2]-ipmi
 
 
 .. _nodeset-stepping:
@@ -393,6 +397,7 @@ Arithmetic operations usage examples::
     $ nodeset -f node[1-9] -x node6 -i node[6-12]
     node[7-9]
 
+.. _nodeset-extended-patterns:
 
 *Extended patterns* support
 """""""""""""""""""""""""""
@@ -416,9 +421,10 @@ patterns" (inherited from :class:`.NodeSet` extended pattern feature, see
 Special operations
 ^^^^^^^^^^^^^^^^^^
 
-Three special operations are currently available: node set slicing, splitting
-on a predefined node count and splitting non-contiguous subsets. There are all
-explained below.
+A few special operations are currently available: node set slicing, splitting
+on a predefined node count, splitting non-contiguous subsets, choosing fold
+axis (for multidimensional node sets) and picking N nodes randomly. They are
+all explained below.
 
 Slicing
 """""""
@@ -559,6 +565,19 @@ useful to fold along the last axis whatever number of dimensions used::
 
     $ nodeset --axis=-1 -f comp-[1-2]-[1-36],login-[1-2]
     comp-1-[1-36],comp-2-[1-36],login-[1-2]
+
+.. _nodeset-pick:
+
+Picking N node(s) at random
+"""""""""""""""""""""""""""
+
+Use ``--pick`` with a maximum number of nodes you wish to pick randomly from
+the resulting node set (or from the resulting range set with ``-R``)::
+
+    $ nodeset --pick=1 -f node11 node12 node13
+    node12
+    $ nodeset --pick=2 -f node11 node12 node13
+    node[11,13]
 
 
 .. _nodeset-groups:
@@ -810,6 +829,67 @@ Also, version 1.7 introduces a notation extension ``@*`` (or ``@SOURCE:*``)
 that has been added to quickly represent *all nodes* (please refer to
 :ref:`clush-all-nodes` for more details).
 
+
+.. _nodeset-all-nodes:
+
+Selecting all nodes
+"""""""""""""""""""
+
+The option ``-a`` (without argument) can be used to select **all** nodes from
+a group source (see :ref:`node groups configuration <groups-config>` for more
+details on special **all** external shell command upcall). Example of use for
+the default group source::
+
+    $ nodeset -a -f
+    example[4-6,32-159]
+
+Use ``-s/--groupsource`` to select another group source.
+
+If not properly configured, the ``-a`` option may lead to runtime errors
+like::
+
+    $ nodeset -s mybrokensource -a -f
+    nodeset: External error: Not enough working methods (all or map + list)
+        to get all nodes
+
+A similar option is available with :ref:`clush-tool`, see
+:ref:`selecting all nodes with clush <clush-all-nodes>`.
+
+Node wildcards
+""""""""""""""
+
+ClusterShell 1.8 introduces node wildcards: ``*`` means match zero or more
+characters of any type; ``?`` means match exactly one character of any type.
+
+Any wildcard mask found is matched against **all** nodes from the group source
+(see :ref:`nodeset-all-nodes`).
+
+This can be especially useful for server farms, or when cluster node names
+differ.  Say that your :ref:`group configuration <groups-config>` is set to
+return the following "all nodes"::
+
+    $ nodeset -f -a
+    bckserv[1-2],dbserv[1-4],wwwserv[1-9]
+
+Then, you can use wildcards to select particular nodes, as shown below::
+
+    $ nodeset -f 'www*'
+    wwwserv[1-9]
+
+    $ nodeset -f 'www*[1-4]'
+    wwwserv[1-4]
+
+    $ nodeset -f '*serv1'
+    bckserv1,dbserv1,wwwserv1
+
+Wildcard masks are resolved prior to
+:ref:`extended patterns <nodeset-extended-patterns>`, but each mask is
+evaluated as a whole node set operand. In the example below, we select
+all nodes matching ``*serv*`` before removing all nodes matching ``www*``::
+
+    $ nodeset  -f '*serv*!www*'
+    bckserv[1-2],dbserv[1-4]
+
 .. _nodeset-rangeset:
 
 Range sets
@@ -876,8 +956,8 @@ available for range sets, for example::
     1-9,15-20
 
 For now, there is no *extended patterns* syntax for range sets as for node
-sets (cf. nodeset-extended-patterns). However, as the union operator ``,``
-is available natively by design, such expressions are still allowed::
+sets (cf. :ref:`nodeset-extended-patterns`). However, as the union operator
+``,`` is available natively by design, such expressions are still allowed::
 
     $ nodeset -fR 4-10,1-2
     1-2,4-10

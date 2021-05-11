@@ -1,33 +1,21 @@
 #
-# Copyright 2015 Stephane Thiell <sthiell@stanford.edu>
+# Copyright (C) 2015-2017 Stephane Thiell <sthiell@stanford.edu>
 #
-# This file is part of the ClusterShell library.
+# This file is part of ClusterShell.
 #
-# This software is governed by the CeCILL-C license under French law and
-# abiding by the rules of distribution of free software.  You can  use,
-# modify and/ or redistribute the software under the terms of the CeCILL-C
-# license as circulated by CEA, CNRS and INRIA at the following URL
-# "http://www.cecill.info".
+# ClusterShell is free software; you can redistribute it and/or
+# modify it under the terms of the GNU Lesser General Public
+# License as published by the Free Software Foundation; either
+# version 2.1 of the License, or (at your option) any later version.
 #
-# As a counterpart to the access to the source code and  rights to copy,
-# modify and redistribute granted by the license, users are provided only
-# with a limited warranty  and the software's author,  the holder of the
-# economic rights,  and the successive licensors  have only  limited
-# liability.
+# ClusterShell is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+# Lesser General Public License for more details.
 #
-# In this respect, the user's attention is drawn to the risks associated
-# with loading,  using,  modifying and/or developing or reproducing the
-# software by the user in light of its specific status of free software,
-# that may mean  that it is complicated to manipulate,  and  that  also
-# therefore means  that it is reserved for developers  and  experienced
-# professionals having in-depth computer knowledge. Users are therefore
-# encouraged to load and test the software's suitability as regards their
-# requirements in conditions enabling the security of their systems and/or
-# data to be ensured and,  more generally, to use and operate it in the
-# same conditions as regards security.
-#
-# The fact that you are presently reading this means that you have had
-# knowledge of the CeCILL-C license and that you accept its terms.
+# You should have received a copy of the GNU Lesser General Public
+# License along with ClusterShell; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 
 """
 ClusterShell Defaults module.
@@ -35,9 +23,16 @@ ClusterShell Defaults module.
 Manage library defaults.
 """
 
+from __future__ import print_function
+
 # Imported early
 # Should not import any other ClusterShell modules when loaded
-from ConfigParser import ConfigParser, NoOptionError, NoSectionError
+try:
+    from configparser import ConfigParser, NoOptionError, NoSectionError
+except ImportError:
+    # Python 2 compat
+    from ConfigParser import ConfigParser, NoOptionError, NoSectionError
+
 import os
 import sys
 
@@ -53,7 +48,7 @@ CFG_SECTION_TASK_INFO = 'task.info'
 #
 def _task_print_debug(task, line):
     """Default task debug printing function."""
-    print line
+    print(line)
 
 def _load_workerclass(workername):
     """
@@ -63,8 +58,9 @@ def _load_workerclass(workername):
     """
     modname = "ClusterShell.Worker.%s" % workername.capitalize()
 
-    # Import module if not yet loaded
-    if modname.lower() not in [mod.lower() for mod in sys.modules]:
+    # Iterate over a copy of sys.modules' keys to avoid RuntimeError
+    if modname.lower() not in [mod.lower() for mod in list(sys.modules)]:
+        # Import module if not yet loaded
         __import__(modname)
 
     # Get the class pointer
@@ -80,8 +76,7 @@ def _distant_workerclass(defaults):
 
 def config_paths(config_name):
     """Return default path list for a ClusterShell config file name."""
-    return [# system-wide config file
-            '/etc/clustershell/%s' % config_name,
+    return ['/etc/clustershell/%s' % config_name, # system-wide config file
             # default pip --user config file
             os.path.expanduser('~/.local/etc/clustershell/%s' % config_name),
             # per-user config (top override)
@@ -101,6 +96,7 @@ class Defaults(object):
     are initialized (like Task):
 
     * stderr (boolean; default is ``False``)
+    * stdin (boolean; default is ``True``)
     * stdout_msgtree (boolean; default is ``True``)
     * stderr_msgtree (boolean; default is ``True``)
     * engine (string; default is ``'auto'``)
@@ -138,6 +134,7 @@ class Defaults(object):
     # Default values for task "default" sync dict
     #
     _TASK_DEFAULT = {"stderr"             : False,
+                     "stdin"              : True,
                      "stdout_msgtree"     : True,
                      "stderr_msgtree"     : True,
                      "engine"             : 'auto',
@@ -150,6 +147,7 @@ class Defaults(object):
     # Datatype converters for task_default
     #
     _TASK_DEFAULT_CONVERTERS = {"stderr"             : ConfigParser.getboolean,
+                                "stdin"              : ConfigParser.getboolean,
                                 "stdout_msgtree"     : ConfigParser.getboolean,
                                 "stderr_msgtree"     : ConfigParser.getboolean,
                                 "engine"             : ConfigParser.get,
@@ -178,20 +176,17 @@ class Defaults(object):
                              "command_timeout" : ConfigParser.getfloat}
 
     #
-    # List of info keys whose values can safely be propagated in tree mode
+    # Black list of info keys whose values cannot safely be propagated
+    # in tree mode
     #
-    _TASK_INFO_PKEYS = ['debug',
-                        'fanout',
-                        'grooming_delay',
-                        'connect_timeout',
-                        'command_timeout']
+    _TASK_INFO_PKEYS_BL = ['engine', 'print_debug']
 
     def __init__(self, filenames):
         """Initialize Defaults from config filenames"""
 
         self._task_default = self._TASK_DEFAULT.copy()
         self._task_info = self._TASK_INFO.copy()
-        self._task_info_pkeys = list(self._TASK_INFO_PKEYS)
+        self._task_info_pkeys_bl = list(self._TASK_INFO_PKEYS_BL)
 
         config = ConfigParser()
         parsed = config.read(filenames)
@@ -227,7 +222,7 @@ class Defaults(object):
 
     def __setattr__(self, name, value):
         """Defaults attribute assignment"""
-        if name in ('_task_default', '_task_info', '_task_info_pkeys'):
+        if name in ('_task_default', '_task_info', '_task_info_pkeys_bl'):
             object.__setattr__(self, name, value)
         elif name in self._task_default:
             self._task_default[name] = value

@@ -1,17 +1,10 @@
-#!/usr/bin/env python
 # ClusterShell.CLI.OptionParser test suite
-# Written by S. Thiell 2010-09-25
-
+# Written by S. Thiell
 
 """Unit test for CLI.OptionParser"""
 
 from optparse import OptionConflictError
-import os
-import sys
-import tempfile
 import unittest
-
-sys.path.insert(0, '../lib')
 
 from ClusterShell.CLI.OptionParser import OptionParser
 
@@ -51,8 +44,3 @@ class CLIOptionParserTest(unittest.TestCase):
         parser.install_nodes_options()
         parser.install_display_options(separator_option=True, dshbak_compat=True)
         options, _ = parser.parse_args([])
-
-
-if __name__ == '__main__':
-    suites = [unittest.TestLoader().loadTestsFromTestCase(CLIOptionParserTest)]
-    unittest.TextTestRunner(verbosity=2).run(unittest.TestSuite(suites))

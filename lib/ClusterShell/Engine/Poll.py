@@ -1,34 +1,22 @@
 #
-# Copyright CEA/DAM/DIF (2007-2015)
-#  Contributor: Stephane THIELL <stephane.thiell@cea.fr>
+# Copyright (C) 2007-2016 CEA/DAM
+# Copyright (C) 2016 Stephane Thiell <sthiell@stanford.edu>
 #
-# This file is part of the ClusterShell library.
+# This file is part of ClusterShell.
 #
-# This software is governed by the CeCILL-C license under French law and
-# abiding by the rules of distribution of free software.  You can  use,
-# modify and/ or redistribute the software under the terms of the CeCILL-C
-# license as circulated by CEA, CNRS and INRIA at the following URL
-# "http://www.cecill.info".
+# ClusterShell is free software; you can redistribute it and/or
+# modify it under the terms of the GNU Lesser General Public
+# License as published by the Free Software Foundation; either
+# version 2.1 of the License, or (at your option) any later version.
 #
-# As a counterpart to the access to the source code and  rights to copy,
-# modify and redistribute granted by the license, users are provided only
-# with a limited warranty  and the software's author,  the holder of the
-# economic rights,  and the successive licensors  have only  limited
-# liability.
+# ClusterShell is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+# Lesser General Public License for more details.
 #
-# In this respect, the user's attention is drawn to the risks associated
-# with loading,  using,  modifying and/or developing or reproducing the
-# software by the user in light of its specific status of free software,
-# that may mean  that it is complicated to manipulate,  and  that  also
-# therefore means  that it is reserved for developers  and  experienced
-# professionals having in-depth computer knowledge. Users are therefore
-# encouraged to load and test the software's suitability as regards their
-# requirements in conditions enabling the security of their systems and/or
-# data to be ensured and,  more generally, to use and operate it in the
-# same conditions as regards security.
-#
-# The fact that you are presently reading this means that you have had
-# knowledge of the CeCILL-C license and that you accept its terms.
+# You should have received a copy of the GNU Lesser General Public
+# License along with ClusterShell; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 
 """
 A poll() based ClusterShell Engine.
@@ -37,8 +25,8 @@ The poll() system call is available on Linux and BSD.
 """
 
 import errno
+import logging
 import select
-import sys
 import time
 
 from ClusterShell.Engine.Engine import Engine, E_READ, E_WRITE
@@ -86,9 +74,9 @@ class EnginePoll(Engine):
     def _modify_specific(self, fd, event, setvalue):
         """
         Engine-specific modifications after a interesting event change for
-        a file descriptor. Called automatically by Engine register/unregister and
-        set_events().  For the poll() engine, it reg/unreg or modifies the event mask
-        associated to a file descriptor.
+        a file descriptor. Called automatically by Engine register/unregister
+        and set_events().  For the poll() engine, it reg/unreg or modifies the
+        event mask associated to a file descriptor.
         """
         self._debug("MODSPEC fd=%d event=%x setvalue=%d" % (fd, event,
                                                             setvalue))
@@ -121,15 +109,20 @@ class EnginePoll(Engine):
                     timeo = timeout
 
                 self._current_loopcnt += 1
-                evlist = self.polling.poll(timeo * 1000.0 + 1.0)
 
-            except select.error, (ex_errno, ex_strerror):
+                if timeo < 0:
+                    poll_timeo = -1
+                else:
+                    poll_timeo = timeo * 1000.0
+                evlist = self.polling.poll(poll_timeo)
+
+            except select.error as ex:
                 # might get interrupted by a signal
-                if ex_errno == errno.EINTR:
+                if ex.args[0] == errno.EINTR:
                     continue
-                elif ex_errno == errno.EINVAL:
-                    print >> sys.stderr, \
-                            "EnginePoll: please increase RLIMIT_NOFILE"
+                elif ex.args[0] == errno.EINVAL:
+                    msg = "Increase RLIMIT_NOFILE?"
+                    logging.getLogger(__name__).error(msg)
                 raise
 
             for fd, event in evlist:
@@ -152,7 +145,8 @@ class EnginePoll(Engine):
                 if event & select.POLLERR:
                     self._debug("POLLERR %s" % client)
                     assert fdev & E_WRITE
-                    self._debug("POLLERR: remove_stream sname %s fdev 0x%x" % (sname, fdev))
+                    self._debug("POLLERR: remove_stream sname %s fdev 0x%x"
+                                % (sname, fdev))
                     self.remove_stream(client, stream)
                     self._current_stream = None
                     continue
@@ -173,16 +167,16 @@ class EnginePoll(Engine):
                 # or check for end of stream (do not handle both at the same
                 # time because handle_read() may perform a partial read)
                 elif event & select.POLLHUP:
-                    self._debug("POLLHUP fd=%d %s (%s)" % (fd,
-                        client.__class__.__name__, client.streams))
+                    self._debug("POLLHUP fd=%d %s (%s)" %
+                                (fd, client.__class__.__name__, client.streams))
                     self.remove_stream(client, stream)
                     self._current_stream = None
                     continue
 
                 # check for writing
                 if event & select.POLLOUT:
-                    self._debug("POLLOUT fd=%d %s (%s)" % (fd,
-                        client.__class__.__name__, client.streams))
+                    self._debug("POLLOUT fd=%d %s (%s)" %
+                                (fd, client.__class__.__name__, client.streams))
                     assert fdev == E_WRITE
                     assert stream.events & fdev
                     self.modify(client, sname, 0, fdev)

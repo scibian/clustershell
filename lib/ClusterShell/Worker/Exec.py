@@ -1,35 +1,23 @@
 #
-# Copyright CEA/DAM/DIF (2014-2015)
-#  Contributor: Aurelien DEGREMONT <aurelien.degremont@cea.fr>
-#  Contributor: Stephane THIELL <sthiell@stanford.edu>
+# Copyright (C) 2014-2015 CEA/DAM
+# Copyright (C) 2014-2015 Aurelien Degremont <aurelien.degremont@cea.fr>
+# Copyright (C) 2014-2017 Stephane Thiell <sthiell@stanford.edu>
 #
-# This file is part of the ClusterShell library.
+# This file is part of ClusterShell.
 #
-# This software is governed by the CeCILL-C license under French law and
-# abiding by the rules of distribution of free software.  You can  use,
-# modify and/ or redistribute the software under the terms of the CeCILL-C
-# license as circulated by CEA, CNRS and INRIA at the following URL
-# "http://www.cecill.info".
+# ClusterShell is free software; you can redistribute it and/or
+# modify it under the terms of the GNU Lesser General Public
+# License as published by the Free Software Foundation; either
+# version 2.1 of the License, or (at your option) any later version.
 #
-# As a counterpart to the access to the source code and  rights to copy,
-# modify and redistribute granted by the license, users are provided only
-# with a limited warranty  and the software's author,  the holder of the
-# economic rights,  and the successive licensors  have only  limited
-# liability.
+# ClusterShell is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+# Lesser General Public License for more details.
 #
-# In this respect, the user's attention is drawn to the risks associated
-# with loading,  using,  modifying and/or developing or reproducing the
-# software by the user in light of its specific status of free software,
-# that may mean  that it is complicated to manipulate,  and  that  also
-# therefore means  that it is reserved for developers  and  experienced
-# professionals having in-depth computer knowledge. Users are therefore
-# encouraged to load and test the software's suitability as regards their
-# requirements in conditions enabling the security of their systems and/or
-# data to be ensured and,  more generally, to use and operate it in the
-# same conditions as regards security.
-#
-# The fact that you are presently reading this means that you have had
-# knowledge of the CeCILL-C license and that you accept its terms.
+# You should have received a copy of the GNU Lesser General Public
+# License along with ClusterShell; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 
 """
 ClusterShell base worker for process-based workers.
@@ -47,6 +35,7 @@ from string import Template
 from ClusterShell.NodeSet import NodeSet
 from ClusterShell.Worker.EngineClient import EngineClient
 from ClusterShell.Worker.Worker import WorkerError, DistantWorker
+from ClusterShell.Worker.Worker import _eh_sigspec_invoke_compat
 
 
 def _replace_cmd(pattern, node, rank):
@@ -68,7 +57,7 @@ def _replace_cmd(pattern, node, rank):
         delimiter = '%'
     try:
         cmd = Replacer(pattern).substitute(variables)
-    except KeyError, error:
+    except (KeyError, ValueError) as error:
         msg = "%s is not a valid pattern, use '%%%%' to escape '%%'" % error
         raise WorkerError(msg)
     return cmd
@@ -111,11 +100,11 @@ class ExecClient(EngineClient):
         cmd, cmd_env = self._build_cmd()
 
         # If command line is string, we need to interpret it as a shell command
-        shell = type(cmd) is str
+        shell = isinstance(cmd, str)
 
         task = self.worker.task
         if task.info("debug", False):
-            name = str(self.__class__).upper().split('.')[-1]
+            name = self.__class__.__name__.upper().split('.')[-1]
             if shell:
                 task.info("print_debug")(task, "%s: %s" % (name, cmd))
             else:
@@ -139,15 +128,16 @@ class ExecClient(EngineClient):
         prc = self.popen.wait()
 
         self.streams.clear()
+        self.invalidate()
 
         if prc >= 0:
-            self._on_nodeset_rc(self.key, prc)
+            self._on_nodeset_close(self.key, prc)
         elif timeout:
             assert abort, "abort flag not set on timeout"
             self.worker._on_node_timeout(self.key)
         elif not abort:
             # if process was signaled, return 128 + signum (bash-like)
-            self._on_nodeset_rc(self.key, 128 + -prc)
+            self._on_nodeset_close(self.key, 128 + -prc)
 
         self.worker._check_fini()
 
@@ -159,13 +149,13 @@ class ExecClient(EngineClient):
         else:
             self.worker._on_start(nodes)
 
-    def _on_nodeset_rc(self, nodes, rc):
+    def _on_nodeset_close(self, nodes, rc):
         """local wrapper over _on_node_rc that can also handle nodeset"""
         if isinstance(nodes, NodeSet):
             for node in nodes:
-                self.worker._on_node_rc(node, rc)
+                self.worker._on_node_close(node, rc)
         else:
-            self.worker._on_node_rc(nodes, rc)
+            self.worker._on_node_close(nodes, rc)
 
     def _on_nodeset_msgline(self, nodes, msg, sname):
         """local wrapper over _on_node_msgline that can also handle nodeset"""
@@ -385,9 +375,13 @@ class ExecWorker(DistantWorker):
         """
         self._close_count += 1
         assert self._close_count <= len(self._clients)
-        if self._close_count == len(self._clients) and self.eh:
-            if self._has_timeout:
+        if self._close_count == len(self._clients) and self.eh is not None:
+            # also use hasattr check because ev_timeout was missing in 1.8.0
+            if self._has_timeout and hasattr(self.eh, 'ev_timeout'):
+                # Legacy ev_timeout event
                 self.eh.ev_timeout(self)
-            self.eh.ev_close(self)
+            _eh_sigspec_invoke_compat(self.eh.ev_close, 2, self,
+                                      self._has_timeout)
+
 
 WORKER_CLASS = ExecWorker
